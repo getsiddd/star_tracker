@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+message cameraConfiguration {
+    int32 index = 8;
+    string deviceID = 1;
+    double focalLength = 2;
+    double pixelSize = 3;
+    double fov = 4;
+    int32 xResolution = 5;
+    int32 yResolution = 6;
+    double pixelRate = 7;
+}
+
+message systemConfiguration {
+    repeated cameraConfiguration cameras = 1;
+    string centroidAlgo = 2;
+    string attitudeAlgo = 3;
+    double centroidMagFilter = 4;
+    string databasePath = 5;
+    string idAlgo = 6;
+    double angularTolerance = 8;
+    int32 centroidFilterBrightest = 9;
+    int32 estimatedNumFalseStars = 10;
+    float maxMismatchProb = 11;
+    float centroidCompareThreshold = 12;
+    float attitudeCompareThreshold = 13;
+}

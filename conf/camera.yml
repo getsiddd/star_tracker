@@ -1,0 +1,30 @@
+# Multi-camera configuration for body-frame fusion.
+#
+# body_vectors:
+# - boresight_body: unit vector in spacecraft body frame indicating the camera optical axis.
+# - up_body: unit vector in spacecraft body frame indicating camera image +Y direction.
+#
+# summary_tsv should point to the auto-generated file produced by:
+#   ./bin/lost blind-solve-batch ... --output-dir <dir>
+# which writes <dir>/summary.tsv
+
+frame:
+  reference: satellite_body
+  note: all position/orientation/vector fields are with respect to satellite body frame
+
+cameras:
+  - id: cam0
+    device_id: /dev/video0
+    boresight_body: [1.0, 0.0, 0.0]
+    up_body: [0.0, 0.0, 1.0]
+    summary_tsv: logs/cam0_run/summary.tsv
+
+  - id: cam1
+    device_id: /dev/video1
+    boresight_body: [0.0, 1.0, 0.0]
+    up_body: [0.0, 0.0, 1.0]
+    summary_tsv: logs/cam1_run/summary.tsv
+
+fusion:
+  min_cameras: 2
+  weighting: inverse_pixel_scale

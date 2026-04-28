@@ -1,0 +1,138 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  background: #0c1117;
+  color: #f4f7fb;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  min-height: 100vh;
+}
+
+.panel {
+  padding: 16px;
+  border-right: 1px solid #1e2a36;
+  background: #111a24;
+  overflow-y: auto;
+}
+
+.panel h1 {
+  margin: 0 0 10px 0;
+  font-size: 1.3rem;
+}
+
+.panel h2 {
+  margin: 14px 0 8px 0;
+  font-size: 1rem;
+  color: #9ac3ff;
+}
+
+.hint {
+  color: #c0cedf;
+  font-size: 0.86rem;
+  margin: 0 0 10px 0;
+}
+
+label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 0.86rem;
+  color: #d5e2f3;
+}
+
+input,
+select,
+textarea,
+button {
+  width: 100%;
+  border: 1px solid #2b4054;
+  background: #0f1720;
+  color: #ecf4ff;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.9rem;
+}
+
+textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+button {
+  cursor: pointer;
+  background: #1a2633;
+}
+
+button:hover {
+  background: #26384b;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.export-row {
+  margin-top: 12px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.viewport-wrap {
+  position: relative;
+  min-height: 100vh;
+}
+
+#viewport {
+  width: 100%;
+  height: 100vh;
+}
+
+.legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  background: rgba(12, 18, 26, 0.8);
+  border: 1px solid #2a3f53;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.dot.sat { background: #3c5167; }
+.dot.cam { background: #ffaf49; }
+.dot.axis { background: #72a0ff; }
+
+@media (max-width: 980px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    border-right: none;
+    border-bottom: 1px solid #1e2a36;
+  }
+
+  #viewport {
+    height: 60vh;
+  }
+}

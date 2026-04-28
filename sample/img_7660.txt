@@ -1,0 +1,8 @@
+attitude_known 1
+attitude_ra 17.9885
+attitude_de 63.4237
+attitude_roll 12.2441
+attitude_i 0.00790028
+attitude_j 0.530407
+attitude_k -0.0768671
+attitude_real 0.844214

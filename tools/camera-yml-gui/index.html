@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camera YAML GUI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <h1>Camera YAML GUI</h1>
+      <p class="hint">Place star trackers on the satellite body and export <code>camera.yml</code>. All coordinates are in satellite body frame. Mouse drag rotates view only.</p>
+
+      <div class="row">
+        <button id="addCameraBtn">Add Tracker</button>
+        <button id="removeCameraBtn">Remove Selected</button>
+      </div>
+
+      <label for="cameraSelect">Selected Tracker</label>
+      <select id="cameraSelect"></select>
+
+      <h2>Identity</h2>
+      <label for="camId">id</label>
+      <input id="camId" type="text" />
+
+      <label for="deviceId">device_id</label>
+      <input id="deviceId" type="text" />
+
+      <label for="summaryTsv">summary_tsv</label>
+      <input id="summaryTsv" type="text" />
+
+      <h2>Position (body frame)</h2>
+      <div class="grid3">
+        <div>
+          <label for="posX">x</label>
+          <input id="posX" type="number" step="0.01" />
+        </div>
+        <div>
+          <label for="posY">y</label>
+          <input id="posY" type="number" step="0.01" />
+        </div>
+        <div>
+          <label for="posZ">z</label>
+          <input id="posZ" type="number" step="0.01" />
+        </div>
+      </div>
+
+      <h2>Orientation (deg)</h2>
+      <p class="hint">Yaw (Z), Pitch (Y), Roll (X)</p>
+      <div class="grid3">
+        <div>
+          <label for="yawDeg">yaw</label>
+          <input id="yawDeg" type="number" step="0.1" />
+        </div>
+        <div>
+          <label for="pitchDeg">pitch</label>
+          <input id="pitchDeg" type="number" step="0.1" />
+        </div>
+        <div>
+          <label for="rollDeg">roll</label>
+          <input id="rollDeg" type="number" step="0.1" />
+        </div>
+      </div>
+
+      <h2>Fusion</h2>
+      <label for="minCameras">min_cameras</label>
+      <input id="minCameras" type="number" min="1" step="1" value="2" />
+
+      <label for="weighting">weighting</label>
+      <select id="weighting">
+        <option value="inverse_pixel_scale">inverse_pixel_scale</option>
+        <option value="uniform">uniform</option>
+      </select>
+
+      <div class="row export-row">
+        <button id="generateBtn">Generate YAML</button>
+        <button id="downloadBtn">Download camera.yml</button>
+      </div>
+
+      <label for="yamlOutput">Generated YAML</label>
+      <textarea id="yamlOutput" rows="16"></textarea>
+    </aside>
+
+    <main class="viewport-wrap">
+      <div id="viewport"></div>
+      <div class="legend">
+        <div><span class="dot sat"></span>Satellite body</div>
+        <div><span class="dot cam"></span>Star tracker</div>
+        <div><span class="dot axis"></span>Body-frame axes (X/Y/Z)</div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

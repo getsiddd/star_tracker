@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Build artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+bin/
+libproto.a
+
+# Runtime outputs
+logs/
+
+# Astrometry downloaded indexes (large, machine-specific)
+conf/astrometry-index/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editor/workspace
+*.code-workspace
