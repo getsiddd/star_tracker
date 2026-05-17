@@ -25,6 +25,12 @@ Use this decision flow:
 - Keep `downsample` moderate (for example 2) unless star density is very high.
 - Start with `timeout 400`; increase only for difficult images.
 
+For live-mode robustness and lower latency:
+
+- Use two-pass solves: small `fast_timeout` first, then retry failed frames with `fallback_timeout`.
+- Use frame decimation with `solve_every_nth` so not every captured frame is solved.
+- Keep fallback enabled (`fallback_on_fail: on`) to preserve solve rate while maintaining fast average throughput.
+
 ## Validation checklist
 
 - Confirm index files are readable and not corrupted.

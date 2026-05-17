@@ -17,6 +17,13 @@ Current mode defaults in `conf/camera.yml` include:
 - `preprocess: on`
 - `preprocess_mode: global`
 
+Live mode can also run a two-pass robust solve profile:
+
+- `fast_timeout`: timeout for initial fast pass
+- `fallback_timeout`: timeout for retry pass on failed frames
+- `fallback_on_fail`: `on|off` retry control
+- `solve_every_nth`: frame decimation before solving
+
 Per-camera values override mode defaults.
 
 ## Python runner
@@ -54,3 +61,9 @@ CLI timeout override for all cameras in the selected mode:
 - Command used: `<results-dir>/<camera_id>/command.txt`
 - Run log: `<results-dir>/<camera_id>/run.log`
 - Aggregate table: `<results-dir>/timings.tsv`
+
+For live mode with fallback enabled, additional artifacts are produced under each camera output directory:
+
+- `solve_fast/summary.tsv`: first pass summary
+- `solve_fallback/summary.tsv`: retry summary for failed frames
+- `solve/summary_merged.tsv`: merged result table (fallback rows override failed fast rows)

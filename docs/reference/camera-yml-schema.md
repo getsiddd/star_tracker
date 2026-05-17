@@ -41,6 +41,10 @@ live defaults:
 - `jobs`
 - `fps`
 - `duration_sec`
+- `fast_timeout`
+- `fallback_timeout`
+- `fallback_on_fail`
+- `solve_every_nth`
 
 ## Camera entries
 

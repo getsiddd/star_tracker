@@ -61,6 +61,10 @@ solve_modes:
       scale_high: 400
       downsample: 2
       timeout: 400
+      fast_timeout: 25
+      fallback_timeout: 120
+      fallback_on_fail: on
+      solve_every_nth: 2
       jobs: 2
       fps: 1
       duration_sec: 60

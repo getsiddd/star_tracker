@@ -22,6 +22,12 @@ DOWNSAMPLE="2"
 TIMEOUT_SEC="60"
 JOBS="2"
 TARGET_WIDTH="720"
+FAST_TIMEOUT_SEC="20"
+FALLBACK_TIMEOUT_SEC="120"
+FALLBACK_ON_FAIL="on"
+SOLVE_EVERY_NTH="1"
+FAST_TIMEOUT_SET="0"
+FALLBACK_TIMEOUT_SET="0"
 
 usage() {
   cat <<EOF
@@ -41,6 +47,10 @@ Options:
   --scale-high <v>              Upper plate scale (arcsec/pixel)
   --downsample <n>              Solve downsample
   --timeout <n>                 Per-image solver timeout
+  --fast-timeout <n>            Fast pass timeout (default: 20)
+  --fallback-timeout <n>        Fallback timeout for failed frames (default: 120)
+  --fallback-on-fail <on|off>   Retry failed frames with fallback pass (default: on)
+  --solve-every-nth <n>         Keep every Nth frame before solve (default: 1)
   --jobs <n>                    Batch workers
   --target-width <px>           Global preprocessing target width (default: 720)
   --help                        Show this help
@@ -67,6 +77,10 @@ while [[ $# -gt 0 ]]; do
     --scale-high) SCALE_HIGH="$2"; shift 2 ;;
     --downsample) DOWNSAMPLE="$2"; shift 2 ;;
     --timeout) TIMEOUT_SEC="$2"; shift 2 ;;
+    --fast-timeout) FAST_TIMEOUT_SEC="$2"; FAST_TIMEOUT_SET="1"; shift 2 ;;
+    --fallback-timeout) FALLBACK_TIMEOUT_SEC="$2"; FALLBACK_TIMEOUT_SET="1"; shift 2 ;;
+    --fallback-on-fail) FALLBACK_ON_FAIL="$2"; shift 2 ;;
+    --solve-every-nth) SOLVE_EVERY_NTH="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --target-width) TARGET_WIDTH="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
@@ -74,9 +88,27 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Backward compatibility: if only --timeout is passed, apply it to both passes.
+if [[ "$FAST_TIMEOUT_SET" == "0" ]]; then
+  FAST_TIMEOUT_SEC="$TIMEOUT_SEC"
+fi
+if [[ "$FALLBACK_TIMEOUT_SET" == "0" ]]; then
+  FALLBACK_TIMEOUT_SEC="$TIMEOUT_SEC"
+fi
+
 if [[ ! -x "$BIN" ]]; then
   echo "ERROR: missing binary: $BIN"
   echo "Build first: cmake --build . -j4"
+  exit 1
+fi
+
+if ! [[ "$SOLVE_EVERY_NTH" =~ ^[0-9]+$ ]] || [[ "$SOLVE_EVERY_NTH" -lt 1 ]]; then
+  echo "ERROR: --solve-every-nth must be an integer >= 1"
+  exit 1
+fi
+
+if [[ "$FALLBACK_ON_FAIL" != "on" && "$FALLBACK_ON_FAIL" != "off" ]]; then
+  echo "ERROR: --fallback-on-fail must be on or off"
   exit 1
 fi
 
@@ -126,21 +158,44 @@ if [[ -n "$MAX_FRAMES" ]]; then
   FRAMES_DIR="$tmp_dir"
 fi
 
+if [[ "$SOLVE_EVERY_NTH" -gt 1 ]]; then
+  tmp_stride_dir="$OUT_DIR/frames_stride"
+  mkdir -p "$tmp_stride_dir"
+  shopt -s nullglob
+  frames=($(ls "$FRAMES_DIR"/*.png 2>/dev/null | sort))
+  shopt -u nullglob
+
+  kept=0
+  idx=0
+  for frame in "${frames[@]}"; do
+    if (( idx % SOLVE_EVERY_NTH == 0 )); then
+      cp "$frame" "$tmp_stride_dir/"
+      kept=$((kept + 1))
+    fi
+    idx=$((idx + 1))
+  done
+
+  if [[ "$kept" -gt 0 ]]; then
+    FRAMES_DIR="$tmp_stride_dir"
+  fi
+fi
+
 frame_count=$(find "$FRAMES_DIR" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')
 if [[ "$frame_count" == "0" ]]; then
   echo "ERROR: no frames extracted"
   exit 1
 fi
 
-echo "Running blind-solve-batch on ${frame_count} frames..."
+FAST_OUT_DIR="$OUT_DIR/solve_fast"
+echo "Running fast blind-solve-batch on ${frame_count} frames..."
 "$BIN" blind-solve-batch \
   --input-dir "$FRAMES_DIR" \
   --index-dir "$INDEX_DIR" \
-  --output-dir "$OUT_DIR/solve" \
+  --output-dir "$FAST_OUT_DIR" \
   --scale-low "$SCALE_LOW" \
   --scale-high "$SCALE_HIGH" \
   --downsample "$DOWNSAMPLE" \
-  --timeout "$TIMEOUT_SEC" \
+  --timeout "$FAST_TIMEOUT_SEC" \
   --jobs "$JOBS" \
   --preprocess on \
   --preprocess-mode global \
@@ -148,8 +203,47 @@ echo "Running blind-solve-batch on ${frame_count} frames..."
   --max-dim 2200 \
   --overwrite
 
+MERGED_SUMMARY="$OUT_DIR/solve/summary_merged.tsv"
+mkdir -p "$OUT_DIR/solve"
+cp "$FAST_OUT_DIR/summary.tsv" "$MERGED_SUMMARY"
+
+if [[ "$FALLBACK_ON_FAIL" == "on" ]]; then
+  failed_dir="$OUT_DIR/failed_frames"
+  mkdir -p "$failed_dir"
+
+  awk -F '\t' 'NR>1 && $2 != "solved" {print $1}' "$FAST_OUT_DIR/summary.tsv" | while IFS= read -r img; do
+    [[ -z "$img" ]] && continue
+    if [[ -f "$FRAMES_DIR/$img" ]]; then
+      cp "$FRAMES_DIR/$img" "$failed_dir/$img"
+    fi
+  done
+
+  failed_count=$(find "$failed_dir" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')
+  if [[ "$failed_count" -gt 0 ]]; then
+    echo "Fast pass failed on ${failed_count} frames. Running fallback pass..."
+    FALLBACK_OUT_DIR="$OUT_DIR/solve_fallback"
+    "$BIN" blind-solve-batch \
+      --input-dir "$failed_dir" \
+      --index-dir "$INDEX_DIR" \
+      --output-dir "$FALLBACK_OUT_DIR" \
+      --scale-low "$SCALE_LOW" \
+      --scale-high "$SCALE_HIGH" \
+      --downsample "$DOWNSAMPLE" \
+      --timeout "$FALLBACK_TIMEOUT_SEC" \
+      --jobs "$JOBS" \
+      --preprocess on \
+      --preprocess-mode global \
+      --target-width "$TARGET_WIDTH" \
+      --max-dim 2200 \
+      --overwrite
+
+    awk -F '\t' 'NR==FNR{if(FNR>1) fb[$1]=$0; next} FNR==1{print; next} { if ($1 in fb) print fb[$1]; else print }' \
+      "$FALLBACK_OUT_DIR/summary.tsv" "$FAST_OUT_DIR/summary.tsv" > "$MERGED_SUMMARY"
+  fi
+fi
+
 echo
 echo "Done. Key outputs:"
 echo "  Frames:       $FRAMES_DIR"
-echo "  Solve logs:   $OUT_DIR/solve"
-echo "  Summary TSV:  $OUT_DIR/solve/summary.tsv"
+echo "  Fast logs:    $FAST_OUT_DIR"
+echo "  Merged TSV:   $MERGED_SUMMARY"

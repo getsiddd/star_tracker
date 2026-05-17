@@ -156,6 +156,10 @@ def build_live_command(
     scale_high = str(opt(camera, defaults, "scale_high", 400))
     downsample = str(opt(camera, defaults, "downsample", 2))
     timeout = str(opt(camera, defaults, "timeout", 400))
+    fast_timeout = str(opt(camera, defaults, "fast_timeout", timeout))
+    fallback_timeout = str(opt(camera, defaults, "fallback_timeout", timeout))
+    fallback_on_fail = to_on_off(opt(camera, defaults, "fallback_on_fail", "on"), "on")
+    solve_every_nth = str(opt(camera, defaults, "solve_every_nth", 1))
     jobs = str(opt(camera, defaults, "jobs", 2))
     target_width = str(opt(camera, defaults, "target_width", 720))
 
@@ -172,6 +176,10 @@ def build_live_command(
         "--scale-high", scale_high,
         "--downsample", downsample,
         "--timeout", timeout,
+        "--fast-timeout", fast_timeout,
+        "--fallback-timeout", fallback_timeout,
+        "--fallback-on-fail", fallback_on_fail,
+        "--solve-every-nth", solve_every_nth,
         "--jobs", jobs,
         "--target-width", target_width,
     ]
