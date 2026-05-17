@@ -12,6 +12,64 @@ frame:
   reference: satellite_body
   note: all position/orientation/vector fields are with respect to satellite body frame
 
+# Separate solve workflows for camera.yml-driven execution.
+# Used by tools/blind_solve_from_camera_yml.py --mode <single|folder|live>
+solve_modes:
+  single:
+    defaults:
+      index_dir: conf/astrometry-index
+      scale_low: 10
+      scale_high: 400
+      downsample: 2
+      timeout: 400
+      preprocess: on
+      preprocess_mode: global
+      # Force width to 720px for large images (height auto-proportional).
+      target_width: 720
+      max_dim: 2200
+      ecef: on
+      viz_3d: off
+      ecef_console: on
+      overwrite: true
+    cameras:
+      - id: cam0_single
+        image: sample/_AST0931.JPG
+      - id: cam1_single
+        image: sample/_AST0938.JPG
+
+  folder:
+    defaults:
+      index_dir: conf/astrometry-index
+      scale_low: 10
+      scale_high: 400
+      downsample: 2
+      timeout: 400
+      jobs: 2
+      preprocess: on
+      preprocess_mode: global
+      target_width: 720
+      max_dim: 2200
+      overwrite: true
+    cameras:
+      - id: cam0_folder
+        input_dir: sample
+
+  live:
+    defaults:
+      index_dir: conf/astrometry-index
+      scale_low: 10
+      scale_high: 400
+      downsample: 2
+      timeout: 400
+      jobs: 2
+      fps: 1
+      duration_sec: 60
+      target_width: 720
+    cameras:
+      - id: cam0_live
+        camera_index: 0
+
+# Fusion cameras remain separate and are used by tools/fuse_multi_star_tracker.py.
 cameras:
   - id: cam0
     device_id: /dev/video0

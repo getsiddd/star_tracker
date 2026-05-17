@@ -212,6 +212,23 @@ bool BuildPreprocessedInputs(const std::filesystem::path &imagePath,
     }
 
     if (mode == "global") {
+        if (values.preprocessTargetWidth > 0 && width > values.preprocessTargetWidth) {
+            std::filesystem::path resizedPath = outputDirectory / "preprocessed_global.png";
+            std::string resizeCommand =
+                "sips --resampleWidth " + std::to_string(values.preprocessTargetWidth) + " " +
+                ShellEscape(imagePath.string()) + " --out " + ShellEscape(resizedPath.string()) +
+                " >/dev/null 2>&1";
+
+            int status = std::system(resizeCommand.c_str());
+            if (status == -1 || !std::filesystem::exists(resizedPath)) {
+                errorOut = "Failed to resize image to target width with sips: " + imagePath.string();
+                return false;
+            }
+
+            inputs.push_back(resizedPath);
+            return true;
+        }
+
         const int longestSide = std::max(width, height);
         if (values.preprocessMaxDimension <= 0 || longestSide <= values.preprocessMaxDimension) {
             inputs.push_back(imagePath);

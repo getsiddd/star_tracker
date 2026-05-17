@@ -2,6 +2,19 @@
 
 This project includes a blind star-field solver wrapper around `astrometry.net`.
 
+## Documentation
+
+Project documentation is now organized under `docs/`:
+
+- `docs/README.md`
+- `docs/quickstart/ecef-quickstart.md`
+- `docs/guides/blind-solve.md`
+- `docs/guides/camera-yml-workflows.md`
+- `docs/guides/ecef-attitude-guide.md`
+- `docs/reference/cli-blind-solve.md`
+- `docs/reference/camera-yml-schema.md`
+- `docs/operations/performance-troubleshooting.md`
+
 ## 1. Prerequisites
 
 On macOS (Homebrew):
@@ -85,10 +98,15 @@ Note: the current solver config builder scans only the top-level `conf/astrometr
   --output-dir logs/blind-solve-single \
   --scale-low 10 --scale-high 400 \
   --downsample 2 \
-  --timeout 300 \
+  --timeout 400 \
   --preprocess on \
   --preprocess-mode global \
   --max-dim 2200 \
+  --ecef on \
+  --3d-viz on \
+  --viz-output logs/blind-solve-single/ecef_3d.png \
+  --ecef-output logs/blind-solve-single/ecef_attitude.json \
+  --ecef-console on \
   --overwrite
 ```
 
@@ -96,8 +114,181 @@ Key flags:
 - `--preprocess on|off` (default on)
 - `--preprocess-mode global|tiles` (default global)
 - `--max-dim <px>`: global longest-side limit
+- `--target-width <px>`: global mode target width (height kept proportional)
 - `--tile-width`, `--tile-height`, `--tile-overlap`: tile mode controls
 - `--timeout <sec>`: per-image CPU limit for solve-field
+- `--ecef on|off` (default on): enable ECEF transform and output
+- `--3d-viz on|off` (default on): enable 3D Earth/satellite visualization generation
+- `--viz-output <file>`: output PNG path for 3D plot
+- `--ecef-output <file>`: output JSON path for rich ECEF metadata
+- `--ecef-console on|off` (default on): print ECEF formatted block to console
+
+Notes on image resizing/performance:
+- If `--target-width` is set (for example `720`) and input width is larger, image is resized to that width before solve.
+- This is often faster for very large DSLR/stacked images while keeping aspect ratio.
+- If `--target-width` is not set or image width is already smaller, normal `--max-dim` behavior applies.
+
+### Run From camera.yml (Modes Kept Separate)
+
+`conf/camera.yml` now keeps solve workflows separated under `solve_modes`:
+- `solve_modes.single`: single-image per camera
+- `solve_modes.folder`: whole-folder batch per camera
+- `solve_modes.live`: live webcam per camera
+
+Use the same runner with explicit mode selection:
+
+```bash
+# Single-image mode
+python3 tools/blind_solve_from_camera_yml.py \
+  --mode single \
+  --camera-config conf/camera.yml \
+  --binary ./build/bin/lost \
+  --results-dir logs/blind-solve-cameras/single
+
+# Whole-folder mode
+python3 tools/blind_solve_from_camera_yml.py \
+  --mode folder \
+  --camera-config conf/camera.yml \
+  --binary ./build/bin/lost \
+  --results-dir logs/blind-solve-cameras/folder
+
+# Live webcam mode
+python3 tools/blind_solve_from_camera_yml.py \
+  --mode live \
+  --camera-config conf/camera.yml \
+  --binary ./build/bin/lost \
+  --results-dir logs/blind-solve-cameras/live
+```
+
+You can also run camera.yml workflows directly from LOST binary:
+
+```bash
+# Single/folder/live from camera.yml via LOST
+./bin/lost camera-yml --mode single --camera-config conf/camera.yml
+./bin/lost camera-yml --mode folder --camera-config conf/camera.yml
+./bin/lost camera-yml --mode live --camera-config conf/camera.yml
+
+# Run fusion after a multi-camera mode run
+./bin/lost camera-yml --mode folder --camera-config conf/camera.yml --run-fusion \
+  --fusion-output logs/fusion_result.txt
+```
+
+Each mode has its own `defaults` block and camera list; per-camera keys override defaults.
+
+Outputs:
+- Per-camera output directory: `<results-dir>/<camera_id>/`
+- Per-camera logs: `<results-dir>/<camera_id>/run.log`
+- Combined timing table: `<results-dir>/timings.tsv`
+- In `single` mode: per-camera ECEF JSON at `<results-dir>/<camera_id>/ecef_attitude.json`
+
+Fusion behavior for multi-camera runs:
+- Use `--run-fusion` with `./bin/lost camera-yml ...` to trigger fusion after solve.
+- Fusion uses `cameras` + `summary_tsv` entries in `camera.yml` and writes the requested fusion output.
+
+### ECEF JSON Output Schema
+
+When `--ecef-output` is set, the generated JSON now includes solve metadata, time, geodetic coordinates, and full attitude information with explicit keys.
+
+Example structure:
+
+```json
+{
+  "timestamp_utc": "2026-05-17T10:28:48Z",
+  "time": {
+    "julian_date": 2461177.936667,
+    "gmst_rad": 3.283529,
+    "gmst_deg": 188.131231
+  },
+  "blind_solve": {
+    "success": true,
+    "ra_deg": 18.049400,
+    "dec_deg": 63.460600,
+    "ra_hms": "01:12:11.850",
+    "dec_dms": "+63:27:38.182",
+    "rotation_deg": -172.429000,
+    "plate_scale_arcsec_per_pix": 93.744200,
+    "field_width_arcmin": 1527.600000,
+    "field_height_arcmin": 1032.600000,
+    "field_radius_deg": 15.365500,
+    "wcs_file": "logs/blind-solve-single/attempt_1/....wcs"
+  },
+  "ecef": {
+    "quaternion": {
+      "real": -0.527366,
+      "i": 0.068093,
+      "j": -0.846093,
+      "k": -0.007701
+    },
+    "euler_angles_rad": {
+      "ra": 3.419804,
+      "dec": 1.100322,
+      "roll": 3.331668
+    },
+    "axis_directions": {
+      "x": [-0.433181, -0.107104, -0.893451],
+      "y": [-0.123349, 0.989293, -0.058789],
+      "z": [0.891353, 0.084852, -0.442336]
+    }
+  },
+  "position_info": {
+    "ecef_km": {
+      "x": 6778.137000,
+      "y": 0.000000,
+      "z": 0.000000
+    },
+    "distance_from_earth_center_km": 6778.137000
+  },
+  "geodetic": {
+    "latitude_deg": 0.000000,
+    "longitude_deg": 0.000000,
+    "altitude_km": 400.000000
+  }
+}
+```
+
+Compatibility keys (`position`, `quaternion`, `euler_angles`, `x_axis`, `y_axis`, `z_axis`) remain present for existing tooling.
+
+### Benchmark All Sample Images (Per-Image Time)
+
+The command below runs `blind-solve` on each image in `sample/`, records elapsed seconds, solve status, RA/Dec, and output JSON path.
+
+```bash
+mkdir -p logs/benchmark-sample
+printf "image\tstatus\telapsed_sec\tra_deg\tdec_deg\tecef_json\n" > logs/benchmark-sample/timings.tsv
+
+for img in sample/*.{jpg,JPG,jpeg,JPEG,png,PNG,tif,tiff,TIF,TIFF}; do
+  [ -f "$img" ] || continue
+  name="$(basename "$img")"
+  outdir="logs/benchmark-sample/${name%.*}"
+  mkdir -p "$outdir"
+
+  start=$(date +%s)
+  out=$(./bin/lost blind-solve \
+    --image "$img" \
+    --index-dir conf/astrometry-index \
+    --output-dir "$outdir" \
+    --scale-low 10 --scale-high 400 \
+    --downsample 2 \
+    --timeout 400 \
+    --preprocess on \
+    --preprocess-mode global \
+    --max-dim 2200 \
+    --ecef on \
+    --3d-viz off \
+    --ecef-output "$outdir/ecef_attitude.json" \
+    --overwrite 2>&1)
+  end=$(date +%s)
+
+  elapsed=$((end - start))
+  status=$(printf "%s\n" "$out" | awk '/blind_solve_success/{print $2}' | tail -1)
+  ra=$(printf "%s\n" "$out" | awk '/blind_solve_ra_deg/{print $2}' | tail -1)
+  dec=$(printf "%s\n" "$out" | awk '/blind_solve_dec_deg/{print $2}' | tail -1)
+
+  printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$name" "${status:-0}" "$elapsed" "${ra:-NA}" "${dec:-NA}" "$outdir/ecef_attitude.json" \
+    >> logs/benchmark-sample/timings.tsv
+done
+```
 
 ## 6. Batch Solve
 
@@ -108,7 +299,7 @@ Key flags:
   --output-dir logs/blind-solve-batch \
   --scale-low 10 --scale-high 400 \
   --downsample 2 \
-  --timeout 300 \
+  --timeout 400 \
   --jobs 4 \
   --preprocess on \
   --preprocess-mode global \
@@ -394,3 +585,54 @@ Internet sources reviewed while preparing this flow:
   - https://arxiv.org/search/?query=star+tracker+attitude+fusion&searchtype=all
 
 Practical note: the strongest improvements for your project right now are usually from better index coverage and robust multi-camera fusion weighting, not just increasing compute.
+
+## Quickstart: Use Exactly This
+
+### 1. Sync Binary
+Ensure the latest build binary is synced to `./bin/lost`:
+```bash
+cp ./build/bin/lost ./bin/lost
+```
+
+### 2. Direct Per-Image Solve
+```bash
+./bin/lost blind-solve \
+  --image sample/_AST0931.JPG \
+  --index-dir conf/astrometry-index \
+  --output-dir logs/blind-solve-single \
+  --scale-low 10 --scale-high 400 \
+  --downsample 2 \
+  --timeout 400 \
+  --preprocess on \
+  --preprocess-mode global \
+  --target-width 720 \
+  --max-dim 2200 \
+  --ecef on \
+  --3d-viz on \
+  --viz-output logs/blind-solve-single/ecef_3d.png \
+  --ecef-output logs/blind-solve-single/ecef_attitude.json \
+  --ecef-console on \
+  --overwrite
+```
+
+### 3. camera.yml Modes
+#### Single Mode
+```bash
+./bin/lost camera-yml --mode single --camera-config conf/camera.yml
+```
+
+#### Folder Mode
+```bash
+./bin/lost camera-yml --mode folder --camera-config conf/camera.yml
+```
+
+#### Live Mode
+```bash
+./bin/lost camera-yml --mode live --camera-config conf/camera.yml
+```
+
+#### Folder Mode + Fusion
+```bash
+./bin/lost camera-yml --mode folder --camera-config conf/camera.yml --run-fusion \
+  --fusion-output logs/fusion_result.txt
+```

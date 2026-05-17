@@ -21,6 +21,7 @@ SCALE_HIGH="400"
 DOWNSAMPLE="2"
 TIMEOUT_SEC="60"
 JOBS="2"
+TARGET_WIDTH="720"
 
 usage() {
   cat <<EOF
@@ -41,6 +42,7 @@ Options:
   --downsample <n>              Solve downsample
   --timeout <n>                 Per-image solver timeout
   --jobs <n>                    Batch workers
+  --target-width <px>           Global preprocessing target width (default: 720)
   --help                        Show this help
 
 Examples:
@@ -66,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --downsample) DOWNSAMPLE="$2"; shift 2 ;;
     --timeout) TIMEOUT_SEC="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
+    --target-width) TARGET_WIDTH="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -141,6 +144,7 @@ echo "Running blind-solve-batch on ${frame_count} frames..."
   --jobs "$JOBS" \
   --preprocess on \
   --preprocess-mode global \
+  --target-width "$TARGET_WIDTH" \
   --max-dim 2200 \
   --overwrite
 

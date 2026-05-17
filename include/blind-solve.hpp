@@ -22,11 +22,20 @@ public:
     std::string preprocessMode = "global";
     // Longest side limit for global resize while preserving aspect ratio.
     int preprocessMaxDimension = 2200;
+    // If >0, force global preprocessing resize to this width (height kept proportional).
+    int preprocessTargetWidth = 720;
 
     // Tile mode settings.
     int tileWidth = 1800;
     int tileHeight = 1800;
     int tileOverlap = 300;
+
+    // ECEF and visualization options (defaults to enabled for both)
+    bool ecefEnabled = true;              // Enable ECEF transformation (default: true)
+    bool visualization3DEnabled = true;   // Enable 3D visualization (default: true)
+    std::string visualizationOutputPath = "";  // Path to save 3D visualization (PNG)
+    std::string ecefOutputPath = "";      // Path to save ECEF attitude data (JSON)
+    bool ecefConsoleOutput = true;        // Print ECEF attitude to console (default: true)
 };
 
 class BlindSolveResult {

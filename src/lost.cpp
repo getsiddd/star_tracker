@@ -1,4 +1,5 @@
 #include "lost.hpp"
+#include "ecef-integration.hpp"
 
 #include <assert.h>
 #include <sys/types.h>
@@ -34,6 +35,19 @@
 namespace lost {
 
     Lost* _pDefaultLost = NULL;
+
+    static std::string ShellEscape(const std::string &value) {
+        std::string escaped = "'";
+        for (char c : value) {
+            if (c == '\'') {
+                escaped += "'\\''";
+            } else {
+                escaped += c;
+            }
+        }
+        escaped += "'";
+        return escaped;
+    }
 
     Lost* Lost::getInstance()
     {
@@ -132,6 +146,14 @@ namespace lost {
         std::cout << "blind_solve_size_h_arcmin " << (result.fieldHeightDeg * 60.0) << std::endl;
         std::cout << "blind_solve_radius_deg " << result.fieldRadiusDeg << std::endl;
         std::cout << "blind_solve_wcs_file " << result.wcsFilePath << std::endl;
+        
+        // Process ECEF transformation if enabled (default: enabled)
+        if (values.ecefEnabled) {
+            std::string ecefOutput = ProcessBlindSolveToECEF(result, values);
+            if (!ecefOutput.empty()) {
+                std::cout << ecefOutput;
+            }
+        }
     }
 
         // This is separate from `main` just because it's in the `lost` namespace
@@ -317,11 +339,17 @@ namespace lost {
                 timeout,
                 preprocess,
                 preprocessMode,
+                targetWidth,
                 maxDim,
                 tileWidth,
                 tileHeight,
                 tileOverlap,
                 overwrite,
+                ecefEnabled,
+                visualization3D,
+                visualizationOutput,
+                ecefOutput,
+                ecefConsoleOutput,
                 help
             };
 
@@ -335,11 +363,17 @@ namespace lost {
                 {"timeout", required_argument, 0, (int)BlindSolveCliOption::timeout},
                 {"preprocess", required_argument, 0, (int)BlindSolveCliOption::preprocess},
                 {"preprocess-mode", required_argument, 0, (int)BlindSolveCliOption::preprocessMode},
+                {"target-width", required_argument, 0, (int)BlindSolveCliOption::targetWidth},
                 {"max-dim", required_argument, 0, (int)BlindSolveCliOption::maxDim},
                 {"tile-width", required_argument, 0, (int)BlindSolveCliOption::tileWidth},
                 {"tile-height", required_argument, 0, (int)BlindSolveCliOption::tileHeight},
                 {"tile-overlap", required_argument, 0, (int)BlindSolveCliOption::tileOverlap},
                 {"overwrite", no_argument, 0, (int)BlindSolveCliOption::overwrite},
+                {"ecef", required_argument, 0, (int)BlindSolveCliOption::ecefEnabled},
+                {"3d-viz", required_argument, 0, (int)BlindSolveCliOption::visualization3D},
+                {"viz-output", required_argument, 0, (int)BlindSolveCliOption::visualizationOutput},
+                {"ecef-output", required_argument, 0, (int)BlindSolveCliOption::ecefOutput},
+                {"ecef-console", required_argument, 0, (int)BlindSolveCliOption::ecefConsoleOutput},
                 {"help", no_argument, 0, (int)BlindSolveCliOption::help},
                 {0, 0, 0, 0}
             };
@@ -382,6 +416,9 @@ namespace lost {
                     case (int)BlindSolveCliOption::preprocessMode:
                         blindSolveOptions.preprocessMode = optarg;
                         break;
+                    case (int)BlindSolveCliOption::targetWidth:
+                        blindSolveOptions.preprocessTargetWidth = std::stoi(optarg);
+                        break;
                     case (int)BlindSolveCliOption::maxDim:
                         blindSolveOptions.preprocessMaxDimension = std::stoi(optarg);
                         break;
@@ -397,6 +434,36 @@ namespace lost {
                     case (int)BlindSolveCliOption::overwrite:
                         blindSolveOptions.overwrite = true;
                         break;
+                    case (int)BlindSolveCliOption::ecefEnabled: {
+                        std::string value(optarg);
+                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                            return static_cast<char>(std::tolower(c));
+                        });
+                        blindSolveOptions.ecefEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
+                        break;
+                    }
+                    case (int)BlindSolveCliOption::visualization3D: {
+                        std::string value(optarg);
+                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                            return static_cast<char>(std::tolower(c));
+                        });
+                        blindSolveOptions.visualization3DEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
+                        break;
+                    }
+                    case (int)BlindSolveCliOption::visualizationOutput:
+                        blindSolveOptions.visualizationOutputPath = optarg;
+                        break;
+                    case (int)BlindSolveCliOption::ecefOutput:
+                        blindSolveOptions.ecefOutputPath = optarg;
+                        break;
+                    case (int)BlindSolveCliOption::ecefConsoleOutput: {
+                        std::string value(optarg);
+                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                            return static_cast<char>(std::tolower(c));
+                        });
+                        blindSolveOptions.ecefConsoleOutput = (value == "1" || value == "true" || value == "on" || value == "yes");
+                        break;
+                    }
                     case (int)BlindSolveCliOption::help:
                         std::cout
                             << "Usage: ./lost blind-solve --image <image-file> [options]\n"
@@ -409,11 +476,18 @@ namespace lost {
                             << "  --timeout <seconds>   Solver CPU timeout.\n"
                             << "  --preprocess <on|off> Enable preprocessing (default: on).\n"
                             << "  --preprocess-mode <global|tiles> Preprocessing mode (default: global).\n"
+                            << "  --target-width <px>   Global mode target width with proportional height (default: 720).\n"
                             << "  --max-dim <px>        Global mode max longest side (default: 2200).\n"
                             << "  --tile-width <px>     Tile width for tiles mode (default: 1800).\n"
                             << "  --tile-height <px>    Tile height for tiles mode (default: 1800).\n"
                             << "  --tile-overlap <px>   Tile overlap for tiles mode (default: 300).\n"
                             << "  --overwrite           Overwrite previous solve artifacts.\n"
+                            << "\nECEF & Visualization Options (defaults enabled):\n"
+                            << "  --ecef <on|off>       Enable ECEF transformation (default: on).\n"
+                            << "  --3d-viz <on|off>     Enable 3D visualization (default: on).\n"
+                            << "  --viz-output <file>   Save 3D visualization to PNG file.\n"
+                            << "  --ecef-output <file>  Save ECEF attitude to JSON file.\n"
+                            << "  --ecef-console <on|off> Print ECEF attitude to console (default: on).\n"
                             << "\n"
                             << "Outputs:\n"
                             << "  Writes <output-dir>/summary.tsv automatically after each batch run.\n";
@@ -455,6 +529,7 @@ namespace lost {
                 jobs,
                 preprocess,
                 preprocessMode,
+                targetWidth,
                 maxDim,
                 tileWidth,
                 tileHeight,
@@ -474,6 +549,7 @@ namespace lost {
                 {"jobs", required_argument, 0, (int)BlindSolveBatchCliOption::jobs},
                 {"preprocess", required_argument, 0, (int)BlindSolveBatchCliOption::preprocess},
                 {"preprocess-mode", required_argument, 0, (int)BlindSolveBatchCliOption::preprocessMode},
+                {"target-width", required_argument, 0, (int)BlindSolveBatchCliOption::targetWidth},
                 {"max-dim", required_argument, 0, (int)BlindSolveBatchCliOption::maxDim},
                 {"tile-width", required_argument, 0, (int)BlindSolveBatchCliOption::tileWidth},
                 {"tile-height", required_argument, 0, (int)BlindSolveBatchCliOption::tileHeight},
@@ -526,6 +602,9 @@ namespace lost {
                     case (int)BlindSolveBatchCliOption::preprocessMode:
                         batchDefaults.preprocessMode = optarg;
                         break;
+                    case (int)BlindSolveBatchCliOption::targetWidth:
+                        batchDefaults.preprocessTargetWidth = std::stoi(optarg);
+                        break;
                     case (int)BlindSolveBatchCliOption::maxDim:
                         batchDefaults.preprocessMaxDimension = std::stoi(optarg);
                         break;
@@ -554,6 +633,7 @@ namespace lost {
                             << "  --jobs <n>            Number of parallel workers.\n"
                             << "  --preprocess <on|off> Enable preprocessing (default: on).\n"
                             << "  --preprocess-mode <global|tiles> Preprocessing mode (default: global).\n"
+                            << "  --target-width <px>   Global mode target width with proportional height (default: 720).\n"
                             << "  --max-dim <px>        Global mode max longest side (default: 2200).\n"
                             << "  --tile-width <px>     Tile width for tiles mode (default: 1800).\n"
                             << "  --tile-height <px>    Tile height for tiles mode (default: 1800).\n"
@@ -801,8 +881,129 @@ namespace lost {
                 }
             }
 
+        } else if (command == "camera-yml") {
+
+            enum class CameraYmlCliOption {
+                mode,
+                cameraConfig,
+                resultsDir,
+                timingsTsv,
+                python,
+                runFusion,
+                fusionOutput,
+                help
+            };
+
+            static struct option long_options[] = {
+                {"mode", required_argument, 0, (int)CameraYmlCliOption::mode},
+                {"camera-config", required_argument, 0, (int)CameraYmlCliOption::cameraConfig},
+                {"results-dir", required_argument, 0, (int)CameraYmlCliOption::resultsDir},
+                {"timings-tsv", required_argument, 0, (int)CameraYmlCliOption::timingsTsv},
+                {"python", required_argument, 0, (int)CameraYmlCliOption::python},
+                {"run-fusion", no_argument, 0, (int)CameraYmlCliOption::runFusion},
+                {"fusion-output", required_argument, 0, (int)CameraYmlCliOption::fusionOutput},
+                {"help", no_argument, 0, (int)CameraYmlCliOption::help},
+                {0, 0, 0, 0}
+            };
+
+            std::string mode = "single";
+            std::string cameraConfig = "conf/camera.yml";
+            std::string resultsDir = "logs/blind-solve-cameras";
+            std::string timingsTsv = "";
+            std::string pythonExe = "python3";
+            bool runFusion = false;
+            std::string fusionOutput = "logs/fusion_result.txt";
+
+            int index;
+            int option;
+            while ((option = getopt_long(argc, argv, "", long_options, &index)) != -1) {
+                switch (option) {
+                    case (int)CameraYmlCliOption::mode:
+                        mode = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::cameraConfig:
+                        cameraConfig = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::resultsDir:
+                        resultsDir = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::timingsTsv:
+                        timingsTsv = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::python:
+                        pythonExe = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::runFusion:
+                        runFusion = true;
+                        break;
+                    case (int)CameraYmlCliOption::fusionOutput:
+                        fusionOutput = optarg;
+                        break;
+                    case (int)CameraYmlCliOption::help:
+                        std::cout
+                            << "Usage: ./lost camera-yml [options]\n"
+                            << "Options:\n"
+                            << "  --mode <single|folder|live>   camera.yml mode (default: single).\n"
+                            << "  --camera-config <file>        Path to camera.yml (default: conf/camera.yml).\n"
+                            << "  --results-dir <dir>           Output root for mode run (default: logs/blind-solve-cameras).\n"
+                            << "  --timings-tsv <file>          Optional timings table path.\n"
+                            << "  --python <exe>                Python executable (default: python3).\n"
+                            << "  --run-fusion                  Run fusion script after mode execution.\n"
+                            << "  --fusion-output <file>        Fusion output file (default: logs/fusion_result.txt).\n"
+                            << "\nExamples:\n"
+                            << "  ./bin/lost camera-yml --mode single --camera-config conf/camera.yml\n"
+                            << "  ./bin/lost camera-yml --mode folder --camera-config conf/camera.yml\n"
+                            << "  ./bin/lost camera-yml --mode live --camera-config conf/camera.yml\n"
+                            << "  ./bin/lost camera-yml --mode folder --camera-config conf/camera.yml --run-fusion\n";
+                        return;
+                    default:
+                        std::cout << "Illegal flag" << std::endl;
+                        exit(1);
+                }
+            }
+
+            if (mode != "single" && mode != "folder" && mode != "live") {
+                BOOST_LOG_TRIVIAL(error) << "Invalid --mode. Expected single, folder, or live.";
+                exit(1);
+            }
+
+            std::string binaryPath = argv[0];
+            std::string runCmd =
+                ShellEscape(pythonExe) + " " +
+                ShellEscape("tools/blind_solve_from_camera_yml.py") + " " +
+                "--mode " + ShellEscape(mode) + " " +
+                "--camera-config " + ShellEscape(cameraConfig) + " " +
+                "--binary " + ShellEscape(binaryPath) + " " +
+                "--results-dir " + ShellEscape(resultsDir);
+
+            if (!timingsTsv.empty()) {
+                runCmd += " --timings-tsv " + ShellEscape(timingsTsv);
+            }
+
+            BOOST_LOG_TRIVIAL(info) << "Running camera.yml mode: " << mode;
+            int runStatus = std::system(runCmd.c_str());
+            if (runStatus != 0) {
+                BOOST_LOG_TRIVIAL(error) << "camera-yml execution failed with status " << runStatus;
+                exit(1);
+            }
+
+            if (runFusion) {
+                std::string fusionCmd =
+                    ShellEscape(pythonExe) + " " +
+                    ShellEscape("tools/fuse_multi_star_tracker.py") + " " +
+                    "--camera-config " + ShellEscape(cameraConfig) + " " +
+                    "--output " + ShellEscape(fusionOutput);
+
+                BOOST_LOG_TRIVIAL(info) << "Running fusion from camera.yml";
+                int fusionStatus = std::system(fusionCmd.c_str());
+                if (fusionStatus != 0) {
+                    BOOST_LOG_TRIVIAL(error) << "Fusion execution failed with status " << fusionStatus;
+                    exit(1);
+                }
+            }
+
         } else {
-            BOOST_LOG_TRIVIAL(info) << "Usage: ./lost database, ./lost pipeline, ./lost stream, ./lost blind-solve or ./lost blind-solve-batch";
+            BOOST_LOG_TRIVIAL(info) << "Usage: ./lost database, ./lost pipeline, ./lost stream, ./lost blind-solve, ./lost blind-solve-batch or ./lost camera-yml";
             BOOST_LOG_TRIVIAL(info) << "Use --help flag on those commands for further help";
         }
         //return 0;
