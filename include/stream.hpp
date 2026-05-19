@@ -65,7 +65,9 @@ class StreamOptions {
 public:
 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
     type prop = defaultVal;
-#include "./stream-options.hpp"
+#define LOST_OPTIONS_STREAM
+#include "./options.hpp"
+#undef LOST_OPTIONS_STREAM
 #undef LOST_CLI_OPTION
 };
 

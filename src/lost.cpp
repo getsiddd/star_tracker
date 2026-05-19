@@ -21,6 +21,7 @@
 #include <vector>
 #include <iomanip>
 #include <limits>
+#include <set>
 #include <sstream>
 
 #include <boost/thread.hpp>
@@ -47,6 +48,109 @@ namespace lost {
         }
         escaped += "'";
         return escaped;
+    }
+
+    struct BlindSolveBatchCliValues {
+        #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) type prop = defaultVal;
+        #define LOST_OPTIONS_BLIND_SOLVE_BATCH
+        #include "options.hpp"
+        #undef LOST_OPTIONS_BLIND_SOLVE_BATCH
+        #undef LOST_CLI_OPTION
+    };
+
+    struct CameraYmlCliValues {
+        #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) type prop = defaultVal;
+        #define LOST_OPTIONS_CAMERA_YML
+        #include "options.hpp"
+        #undef LOST_OPTIONS_CAMERA_YML
+        #undef LOST_CLI_OPTION
+    };
+
+    template <typename T>
+    bool BuildBlindSolveProfileDefaults(const std::string &requestedProfile,
+                                        T &profileDefaults,
+                                        std::string &errorOut) {
+        std::string normalizedProfile = requestedProfile;
+        std::transform(normalizedProfile.begin(), normalizedProfile.end(), normalizedProfile.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        if (normalizedProfile.empty() || normalizedProfile == "default" || normalizedProfile == "generic" || normalizedProfile == "auto") {
+            profileDefaults.profile = "default";
+            return true;
+        }
+
+        if (normalizedProfile == "wide" || normalizedProfile == "wide-field") {
+            profileDefaults.profile = "wide-field";
+            profileDefaults.scaleLowArcsecPerPix = 20.0f;
+            profileDefaults.scaleHighArcsecPerPix = 400.0f;
+            profileDefaults.downsample = 2;
+            profileDefaults.timeoutSeconds = 180;
+            profileDefaults.preprocessEnabled = true;
+            profileDefaults.preprocessMode = "global";
+            profileDefaults.preprocessTargetWidth = 720;
+            profileDefaults.preprocessMaxDimension = 2200;
+            profileDefaults.tileWidth = 1800;
+            profileDefaults.tileHeight = 1800;
+            profileDefaults.tileOverlap = 300;
+            profileDefaults.maxStarCount = 40;
+            profileDefaults.minStarSeparation = 0.15f;
+            return true;
+        }
+
+        if (normalizedProfile == "narrow" || normalizedProfile == "narrow-field") {
+            profileDefaults.profile = "narrow-field";
+            profileDefaults.scaleLowArcsecPerPix = 15.0f;
+            profileDefaults.scaleHighArcsecPerPix = 90.0f;
+            profileDefaults.downsample = 1;
+            profileDefaults.timeoutSeconds = 240;
+            profileDefaults.preprocessEnabled = true;
+            profileDefaults.preprocessMode = "global";
+            profileDefaults.preprocessTargetWidth = 1280;
+            profileDefaults.preprocessMaxDimension = 2600;
+            profileDefaults.tileWidth = 1800;
+            profileDefaults.tileHeight = 1800;
+            profileDefaults.tileOverlap = 300;
+            profileDefaults.maxStarCount = 60;
+            profileDefaults.minStarSeparation = 0.05f;
+            return true;
+        }
+
+        errorOut = "Unknown blind solve profile: " + requestedProfile + " (expected default, wide-field, or narrow-field).";
+        return false;
+    }
+
+    template <typename T>
+    bool ApplyBlindSolveProfile(T &values,
+                                const std::set<std::string> &explicitProps,
+                                std::string &errorOut) {
+        T profileDefaults;
+        if (!BuildBlindSolveProfileDefaults(values.profile, profileDefaults, errorOut)) {
+            return false;
+        }
+
+        values.profile = profileDefaults.profile;
+
+        auto assignIfImplicit = [&](const char *propName, auto &target, const auto &profileValue) {
+            if (explicitProps.count(propName) == 0) {
+                target = profileValue;
+            }
+        };
+
+        assignIfImplicit("scaleLowArcsecPerPix", values.scaleLowArcsecPerPix, profileDefaults.scaleLowArcsecPerPix);
+        assignIfImplicit("scaleHighArcsecPerPix", values.scaleHighArcsecPerPix, profileDefaults.scaleHighArcsecPerPix);
+        assignIfImplicit("downsample", values.downsample, profileDefaults.downsample);
+        assignIfImplicit("timeoutSeconds", values.timeoutSeconds, profileDefaults.timeoutSeconds);
+        assignIfImplicit("preprocessEnabled", values.preprocessEnabled, profileDefaults.preprocessEnabled);
+        assignIfImplicit("preprocessMode", values.preprocessMode, profileDefaults.preprocessMode);
+        assignIfImplicit("preprocessTargetWidth", values.preprocessTargetWidth, profileDefaults.preprocessTargetWidth);
+        assignIfImplicit("preprocessMaxDimension", values.preprocessMaxDimension, profileDefaults.preprocessMaxDimension);
+        assignIfImplicit("tileWidth", values.tileWidth, profileDefaults.tileWidth);
+        assignIfImplicit("tileHeight", values.tileHeight, profileDefaults.tileHeight);
+        assignIfImplicit("tileOverlap", values.tileOverlap, profileDefaults.tileOverlap);
+        assignIfImplicit("maxStarCount", values.maxStarCount, profileDefaults.maxStarCount);
+        assignIfImplicit("minStarSeparation", values.minStarSeparation, profileDefaults.minStarSeparation);
+        return true;
     }
 
     Lost* Lost::getInstance()
@@ -173,7 +277,9 @@ namespace lost {
 
             enum class DatabaseCliOption {
                 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
-                #include "database-options.hpp"
+                #define LOST_OPTIONS_DATABASE
+                #include "options.hpp"
+                #undef LOST_OPTIONS_DATABASE
                 #undef LOST_CLI_OPTION
                     help
             };
@@ -184,7 +290,9 @@ namespace lost {
                      defaultArg == 0 ? required_argument : optional_argument, \
                      0,                                                         \
                      (int)DatabaseCliOption::prop},
-                #include "database-options.hpp" // NOLINT
+                 #define LOST_OPTIONS_DATABASE
+                 #include "options.hpp" // NOLINT
+                 #undef LOST_OPTIONS_DATABASE
                 #undef LOST_CLI_OPTION
                     {"help", no_argument, 0, (int) DatabaseCliOption::help},
                     {0}
@@ -208,7 +316,9 @@ namespace lost {
                             }                                       \
                         }                                           \
                 break;
-            #include "database-options.hpp" // NOLINT
+            #define LOST_OPTIONS_DATABASE
+            #include "options.hpp" // NOLINT
+            #undef LOST_OPTIONS_DATABASE
             #undef LOST_CLI_OPTION
                     case (int) DatabaseCliOption::help :std::cout << documentation_database_txt << std::endl;
                         //return 0;
@@ -225,7 +335,9 @@ namespace lost {
 
             enum class PipelineCliOption {
                 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
-                #include "pipeline-options.hpp"
+                #define LOST_OPTIONS_PIPELINE
+                #include "options.hpp"
+                #undef LOST_OPTIONS_PIPELINE
                 #undef LOST_CLI_OPTION
                     help
             };
@@ -236,7 +348,9 @@ namespace lost {
                  defaultArg == 0 ? required_argument : optional_argument, \
                  0,                                                         \
                  (int)PipelineCliOption::prop},
-                #include "pipeline-options.hpp" // NOLINT
+                #define LOST_OPTIONS_PIPELINE
+                #include "options.hpp" // NOLINT
+                #undef LOST_OPTIONS_PIPELINE
                 #undef LOST_CLI_OPTION
 
                     // DATABASES
@@ -262,7 +376,9 @@ namespace lost {
                             }                                       \
                         }                                           \
                 break;
-                    #include "pipeline-options.hpp" // NOLINT
+                    #define LOST_OPTIONS_PIPELINE
+                    #include "options.hpp" // NOLINT
+                    #undef LOST_OPTIONS_PIPELINE
                     #undef LOST_CLI_OPTION
                     case (int) PipelineCliOption::help :std::cout << documentation_pipeline_txt << std::endl;
                         //return 0;
@@ -278,7 +394,9 @@ namespace lost {
 
             enum class StreamCliOption {
                 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
-                #include "stream-options.hpp"
+                #define LOST_OPTIONS_STREAM
+                #include "options.hpp"
+                #undef LOST_OPTIONS_STREAM
                 #undef LOST_CLI_OPTION
                 help
             };
@@ -289,7 +407,9 @@ namespace lost {
                  defaultArg == 0 ? required_argument : optional_argument, \
                  0,                                                         \
                  (int)StreamCliOption::prop},
-                #include "stream-options.hpp" // NOLINT
+                #define LOST_OPTIONS_STREAM
+                #include "options.hpp" // NOLINT
+                #undef LOST_OPTIONS_STREAM
                 #undef LOST_CLI_OPTION
 
                     // DATABASES
@@ -315,7 +435,9 @@ namespace lost {
                             }                                       \
                         }                                           \
                 break;
-                #include "stream-options.hpp" // NOLINT
+                #define LOST_OPTIONS_STREAM
+                #include "options.hpp" // NOLINT
+                #undef LOST_OPTIONS_STREAM
                 #undef LOST_CLI_OPTION
                     case (int) StreamCliOption::help :std::cout << documentation_stream_txt << std::endl;
                         //return 0;
@@ -330,144 +452,54 @@ namespace lost {
         } else if (command == "blind-solve") {
 
             enum class BlindSolveCliOption {
-                image,
-                indexDir,
-                outputDir,
-                scaleLow,
-                scaleHigh,
-                downsample,
-                timeout,
-                preprocess,
-                preprocessMode,
-                targetWidth,
-                maxDim,
-                tileWidth,
-                tileHeight,
-                tileOverlap,
-                overwrite,
-                ecefEnabled,
-                visualization3D,
-                visualizationOutput,
-                ecefOutput,
-                ecefConsoleOutput,
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
+                #define LOST_OPTIONS_BLIND_SOLVE
+                #include "options.hpp"
+                #undef LOST_OPTIONS_BLIND_SOLVE
+                #undef LOST_CLI_OPTION
                 help
             };
 
             static struct option long_options[] = {
-                {"image", required_argument, 0, (int)BlindSolveCliOption::image},
-                {"index-dir", required_argument, 0, (int)BlindSolveCliOption::indexDir},
-                {"output-dir", required_argument, 0, (int)BlindSolveCliOption::outputDir},
-                {"scale-low", required_argument, 0, (int)BlindSolveCliOption::scaleLow},
-                {"scale-high", required_argument, 0, (int)BlindSolveCliOption::scaleHigh},
-                {"downsample", required_argument, 0, (int)BlindSolveCliOption::downsample},
-                {"timeout", required_argument, 0, (int)BlindSolveCliOption::timeout},
-                {"preprocess", required_argument, 0, (int)BlindSolveCliOption::preprocess},
-                {"preprocess-mode", required_argument, 0, (int)BlindSolveCliOption::preprocessMode},
-                {"target-width", required_argument, 0, (int)BlindSolveCliOption::targetWidth},
-                {"max-dim", required_argument, 0, (int)BlindSolveCliOption::maxDim},
-                {"tile-width", required_argument, 0, (int)BlindSolveCliOption::tileWidth},
-                {"tile-height", required_argument, 0, (int)BlindSolveCliOption::tileHeight},
-                {"tile-overlap", required_argument, 0, (int)BlindSolveCliOption::tileOverlap},
-                {"overwrite", no_argument, 0, (int)BlindSolveCliOption::overwrite},
-                {"ecef", required_argument, 0, (int)BlindSolveCliOption::ecefEnabled},
-                {"3d-viz", required_argument, 0, (int)BlindSolveCliOption::visualization3D},
-                {"viz-output", required_argument, 0, (int)BlindSolveCliOption::visualizationOutput},
-                {"ecef-output", required_argument, 0, (int)BlindSolveCliOption::ecefOutput},
-                {"ecef-console", required_argument, 0, (int)BlindSolveCliOption::ecefConsoleOutput},
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                {name, defaultArg == 0 ? required_argument : optional_argument, 0, (int)BlindSolveCliOption::prop},
+                #define LOST_OPTIONS_BLIND_SOLVE
+                #include "options.hpp"
+                #undef LOST_OPTIONS_BLIND_SOLVE
+                #undef LOST_CLI_OPTION
                 {"help", no_argument, 0, (int)BlindSolveCliOption::help},
                 {0, 0, 0, 0}
             };
 
             BlindSolveOptions blindSolveOptions;
+            std::set<std::string> explicitBlindSolveProps;
             int index;
             int option;
 
             while ((option = getopt_long(argc, argv, "", long_options, &index)) != -1) {
                 switch (option) {
-                    case (int)BlindSolveCliOption::image:
-                        blindSolveOptions.imagePath = optarg;
+                    #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                    case (int)BlindSolveCliOption::prop:                        \
+                        explicitBlindSolveProps.insert(#prop);                  \
+                        if (defaultArg == 0) {                                  \
+                            blindSolveOptions.prop = converter;                 \
+                        } else {                                                \
+                            if (LOST_OPTIONAL_OPTARG()) {                       \
+                                blindSolveOptions.prop = converter;             \
+                            } else {                                            \
+                                blindSolveOptions.prop = defaultArg;            \
+                            }                                                   \
+                        }                                                       \
                         break;
-                    case (int)BlindSolveCliOption::indexDir:
-                        blindSolveOptions.indexDirectory = optarg;
-                        break;
-                    case (int)BlindSolveCliOption::outputDir:
-                        blindSolveOptions.outputDirectory = optarg;
-                        break;
-                    case (int)BlindSolveCliOption::scaleLow:
-                        blindSolveOptions.scaleLowArcsecPerPix = std::stof(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::scaleHigh:
-                        blindSolveOptions.scaleHighArcsecPerPix = std::stof(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::downsample:
-                        blindSolveOptions.downsample = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::timeout:
-                        blindSolveOptions.timeoutSeconds = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::preprocess: {
-                        std::string value(optarg);
-                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-                            return static_cast<char>(std::tolower(c));
-                        });
-                        blindSolveOptions.preprocessEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
-                        break;
-                    }
-                    case (int)BlindSolveCliOption::preprocessMode:
-                        blindSolveOptions.preprocessMode = optarg;
-                        break;
-                    case (int)BlindSolveCliOption::targetWidth:
-                        blindSolveOptions.preprocessTargetWidth = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::maxDim:
-                        blindSolveOptions.preprocessMaxDimension = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::tileWidth:
-                        blindSolveOptions.tileWidth = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::tileHeight:
-                        blindSolveOptions.tileHeight = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::tileOverlap:
-                        blindSolveOptions.tileOverlap = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveCliOption::overwrite:
-                        blindSolveOptions.overwrite = true;
-                        break;
-                    case (int)BlindSolveCliOption::ecefEnabled: {
-                        std::string value(optarg);
-                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-                            return static_cast<char>(std::tolower(c));
-                        });
-                        blindSolveOptions.ecefEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
-                        break;
-                    }
-                    case (int)BlindSolveCliOption::visualization3D: {
-                        std::string value(optarg);
-                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-                            return static_cast<char>(std::tolower(c));
-                        });
-                        blindSolveOptions.visualization3DEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
-                        break;
-                    }
-                    case (int)BlindSolveCliOption::visualizationOutput:
-                        blindSolveOptions.visualizationOutputPath = optarg;
-                        break;
-                    case (int)BlindSolveCliOption::ecefOutput:
-                        blindSolveOptions.ecefOutputPath = optarg;
-                        break;
-                    case (int)BlindSolveCliOption::ecefConsoleOutput: {
-                        std::string value(optarg);
-                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-                            return static_cast<char>(std::tolower(c));
-                        });
-                        blindSolveOptions.ecefConsoleOutput = (value == "1" || value == "true" || value == "on" || value == "yes");
-                        break;
-                    }
+                    #define LOST_OPTIONS_BLIND_SOLVE
+                    #include "options.hpp"
+                    #undef LOST_OPTIONS_BLIND_SOLVE
+                    #undef LOST_CLI_OPTION
                     case (int)BlindSolveCliOption::help:
                         std::cout
                             << "Usage: ./lost blind-solve --image <image-file> [options]\n"
                             << "Options:\n"
+                            << "  --profile <name>      Preset defaults: default, wide-field, narrow-field.\n"
                             << "  --index-dir <dir>     Path to astrometry index files.\n"
                             << "  --output-dir <dir>    Output directory for solve artifacts.\n"
                             << "  --scale-low <v>       Lower plate scale in arcsec/pixel.\n"
@@ -481,6 +513,8 @@ namespace lost {
                             << "  --tile-width <px>     Tile width for tiles mode (default: 1800).\n"
                             << "  --tile-height <px>    Tile height for tiles mode (default: 1800).\n"
                             << "  --tile-overlap <px>   Tile overlap for tiles mode (default: 300).\n"
+                            << "  --max-star-count <n>  Limit the extracted source list to the brightest N stars (default: 50).\n"
+                            << "  --min-star-separation <deg> Minimum angular separation between selected sources.\n"
                             << "  --overwrite           Overwrite previous solve artifacts.\n"
                             << "\nECEF & Visualization Options (defaults enabled):\n"
                             << "  --ecef <on|off>       Enable ECEF transformation (default: on).\n"
@@ -514,116 +548,65 @@ namespace lost {
                 blindSolveOptions.outputDirectory = "logs/blind-solve";
             }
 
+            std::string blindSolveProfileError;
+            if (!ApplyBlindSolveProfile(blindSolveOptions, explicitBlindSolveProps, blindSolveProfileError)) {
+                BOOST_LOG_TRIVIAL(error) << blindSolveProfileError;
+                exit(1);
+            }
+
             lost::Lost::BlindSolveRun(blindSolveOptions);
 
         } else if (command == "blind-solve-batch") {
 
             enum class BlindSolveBatchCliOption {
-                inputDir,
-                indexDir,
-                outputDir,
-                scaleLow,
-                scaleHigh,
-                downsample,
-                timeout,
-                jobs,
-                preprocess,
-                preprocessMode,
-                targetWidth,
-                maxDim,
-                tileWidth,
-                tileHeight,
-                tileOverlap,
-                overwrite,
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
+                #define LOST_OPTIONS_BLIND_SOLVE_BATCH
+                #include "options.hpp"
+                #undef LOST_OPTIONS_BLIND_SOLVE_BATCH
+                #undef LOST_CLI_OPTION
                 help
             };
 
             static struct option long_options[] = {
-                {"input-dir", required_argument, 0, (int)BlindSolveBatchCliOption::inputDir},
-                {"index-dir", required_argument, 0, (int)BlindSolveBatchCliOption::indexDir},
-                {"output-dir", required_argument, 0, (int)BlindSolveBatchCliOption::outputDir},
-                {"scale-low", required_argument, 0, (int)BlindSolveBatchCliOption::scaleLow},
-                {"scale-high", required_argument, 0, (int)BlindSolveBatchCliOption::scaleHigh},
-                {"downsample", required_argument, 0, (int)BlindSolveBatchCliOption::downsample},
-                {"timeout", required_argument, 0, (int)BlindSolveBatchCliOption::timeout},
-                {"jobs", required_argument, 0, (int)BlindSolveBatchCliOption::jobs},
-                {"preprocess", required_argument, 0, (int)BlindSolveBatchCliOption::preprocess},
-                {"preprocess-mode", required_argument, 0, (int)BlindSolveBatchCliOption::preprocessMode},
-                {"target-width", required_argument, 0, (int)BlindSolveBatchCliOption::targetWidth},
-                {"max-dim", required_argument, 0, (int)BlindSolveBatchCliOption::maxDim},
-                {"tile-width", required_argument, 0, (int)BlindSolveBatchCliOption::tileWidth},
-                {"tile-height", required_argument, 0, (int)BlindSolveBatchCliOption::tileHeight},
-                {"tile-overlap", required_argument, 0, (int)BlindSolveBatchCliOption::tileOverlap},
-                {"overwrite", no_argument, 0, (int)BlindSolveBatchCliOption::overwrite},
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                {name, defaultArg == 0 ? required_argument : optional_argument, 0, (int)BlindSolveBatchCliOption::prop},
+                #define LOST_OPTIONS_BLIND_SOLVE_BATCH
+                #include "options.hpp"
+                #undef LOST_OPTIONS_BLIND_SOLVE_BATCH
+                #undef LOST_CLI_OPTION
                 {"help", no_argument, 0, (int)BlindSolveBatchCliOption::help},
                 {0, 0, 0, 0}
             };
 
-            BlindSolveOptions batchDefaults;
-            std::string inputDir;
-            int jobs = std::max(1u, std::thread::hardware_concurrency());
+            BlindSolveBatchCliValues batchCliValues;
+            std::set<std::string> explicitBlindSolveBatchProps;
             int index;
             int option;
 
             while ((option = getopt_long(argc, argv, "", long_options, &index)) != -1) {
                 switch (option) {
-                    case (int)BlindSolveBatchCliOption::inputDir:
-                        inputDir = optarg;
+                    #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                    case (int)BlindSolveBatchCliOption::prop:                   \
+                        explicitBlindSolveBatchProps.insert(#prop);             \
+                        if (defaultArg == 0) {                                  \
+                            batchCliValues.prop = converter;                    \
+                        } else {                                                \
+                            if (LOST_OPTIONAL_OPTARG()) {                       \
+                                batchCliValues.prop = converter;                \
+                            } else {                                            \
+                                batchCliValues.prop = defaultArg;               \
+                            }                                                   \
+                        }                                                       \
                         break;
-                    case (int)BlindSolveBatchCliOption::indexDir:
-                        batchDefaults.indexDirectory = optarg;
-                        break;
-                    case (int)BlindSolveBatchCliOption::outputDir:
-                        batchDefaults.outputDirectory = optarg;
-                        break;
-                    case (int)BlindSolveBatchCliOption::scaleLow:
-                        batchDefaults.scaleLowArcsecPerPix = std::stof(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::scaleHigh:
-                        batchDefaults.scaleHighArcsecPerPix = std::stof(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::downsample:
-                        batchDefaults.downsample = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::timeout:
-                        batchDefaults.timeoutSeconds = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::jobs:
-                        jobs = std::max(1, std::stoi(optarg));
-                        break;
-                    case (int)BlindSolveBatchCliOption::preprocess: {
-                        std::string value(optarg);
-                        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-                            return static_cast<char>(std::tolower(c));
-                        });
-                        batchDefaults.preprocessEnabled = (value == "1" || value == "true" || value == "on" || value == "yes");
-                        break;
-                    }
-                    case (int)BlindSolveBatchCliOption::preprocessMode:
-                        batchDefaults.preprocessMode = optarg;
-                        break;
-                    case (int)BlindSolveBatchCliOption::targetWidth:
-                        batchDefaults.preprocessTargetWidth = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::maxDim:
-                        batchDefaults.preprocessMaxDimension = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::tileWidth:
-                        batchDefaults.tileWidth = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::tileHeight:
-                        batchDefaults.tileHeight = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::tileOverlap:
-                        batchDefaults.tileOverlap = std::stoi(optarg);
-                        break;
-                    case (int)BlindSolveBatchCliOption::overwrite:
-                        batchDefaults.overwrite = true;
-                        break;
+                    #define LOST_OPTIONS_BLIND_SOLVE_BATCH
+                    #include "options.hpp"
+                    #undef LOST_OPTIONS_BLIND_SOLVE_BATCH
+                    #undef LOST_CLI_OPTION
                     case (int)BlindSolveBatchCliOption::help:
                         std::cout
                             << "Usage: ./lost blind-solve-batch --input-dir <dir> [options]\n"
                             << "Options:\n"
+                            << "  --profile <name>      Preset defaults: default, wide-field, narrow-field.\n"
                             << "  --index-dir <dir>     Path to astrometry index files.\n"
                             << "  --output-dir <dir>    Output directory for solve artifacts.\n"
                             << "  --scale-low <v>       Lower plate scale in arcsec/pixel.\n"
@@ -638,6 +621,8 @@ namespace lost {
                             << "  --tile-width <px>     Tile width for tiles mode (default: 1800).\n"
                             << "  --tile-height <px>    Tile height for tiles mode (default: 1800).\n"
                             << "  --tile-overlap <px>   Tile overlap for tiles mode (default: 300).\n"
+                            << "  --max-star-count <n>  Limit the extracted source list to the brightest N stars (default: 50).\n"
+                            << "  --min-star-separation <deg> Minimum angular separation between selected sources.\n"
                             << "  --overwrite           Overwrite previous solve artifacts.\n";
                         return;
                     default:
@@ -645,6 +630,34 @@ namespace lost {
                         exit(1);
                 }
             }
+
+            std::string blindSolveBatchProfileError;
+            if (!ApplyBlindSolveProfile(batchCliValues, explicitBlindSolveBatchProps, blindSolveBatchProfileError)) {
+                BOOST_LOG_TRIVIAL(error) << blindSolveBatchProfileError;
+                exit(1);
+            }
+
+            BlindSolveOptions batchDefaults;
+            batchDefaults.profile = batchCliValues.profile;
+            batchDefaults.indexDirectory = batchCliValues.indexDirectory;
+            batchDefaults.outputDirectory = batchCliValues.outputDirectory;
+            batchDefaults.scaleLowArcsecPerPix = batchCliValues.scaleLowArcsecPerPix;
+            batchDefaults.scaleHighArcsecPerPix = batchCliValues.scaleHighArcsecPerPix;
+            batchDefaults.downsample = batchCliValues.downsample;
+            batchDefaults.timeoutSeconds = batchCliValues.timeoutSeconds;
+            batchDefaults.preprocessEnabled = batchCliValues.preprocessEnabled;
+            batchDefaults.preprocessMode = batchCliValues.preprocessMode;
+            batchDefaults.preprocessTargetWidth = batchCliValues.preprocessTargetWidth;
+            batchDefaults.preprocessMaxDimension = batchCliValues.preprocessMaxDimension;
+            batchDefaults.tileWidth = batchCliValues.tileWidth;
+            batchDefaults.tileHeight = batchCliValues.tileHeight;
+            batchDefaults.tileOverlap = batchCliValues.tileOverlap;
+            batchDefaults.overwrite = batchCliValues.overwrite;
+            batchDefaults.maxStarCount = batchCliValues.maxStarCount;
+            batchDefaults.minStarSeparation = batchCliValues.minStarSeparation;
+
+            const std::string &inputDir = batchCliValues.inputDir;
+            const int jobs = std::max(1, batchCliValues.jobs);
 
             if (inputDir.empty()) {
                 BOOST_LOG_TRIVIAL(error) << "Missing required option: --input-dir";
@@ -884,61 +897,47 @@ namespace lost {
         } else if (command == "camera-yml") {
 
             enum class CameraYmlCliOption {
-                mode,
-                cameraConfig,
-                resultsDir,
-                timingsTsv,
-                python,
-                runFusion,
-                fusionOutput,
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) prop,
+                #define LOST_OPTIONS_CAMERA_YML
+                #include "options.hpp"
+                #undef LOST_OPTIONS_CAMERA_YML
+                #undef LOST_CLI_OPTION
                 help
             };
 
             static struct option long_options[] = {
-                {"mode", required_argument, 0, (int)CameraYmlCliOption::mode},
-                {"camera-config", required_argument, 0, (int)CameraYmlCliOption::cameraConfig},
-                {"results-dir", required_argument, 0, (int)CameraYmlCliOption::resultsDir},
-                {"timings-tsv", required_argument, 0, (int)CameraYmlCliOption::timingsTsv},
-                {"python", required_argument, 0, (int)CameraYmlCliOption::python},
-                {"run-fusion", no_argument, 0, (int)CameraYmlCliOption::runFusion},
-                {"fusion-output", required_argument, 0, (int)CameraYmlCliOption::fusionOutput},
+                #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                {name, defaultArg == 0 ? required_argument : optional_argument, 0, (int)CameraYmlCliOption::prop},
+                #define LOST_OPTIONS_CAMERA_YML
+                #include "options.hpp"
+                #undef LOST_OPTIONS_CAMERA_YML
+                #undef LOST_CLI_OPTION
                 {"help", no_argument, 0, (int)CameraYmlCliOption::help},
                 {0, 0, 0, 0}
             };
 
-            std::string mode = "single";
-            std::string cameraConfig = "conf/camera.yml";
-            std::string resultsDir = "logs/blind-solve-cameras";
-            std::string timingsTsv = "";
-            std::string pythonExe = "python3";
-            bool runFusion = false;
-            std::string fusionOutput = "logs/fusion_result.txt";
+            CameraYmlCliValues cameraYmlValues;
 
             int index;
             int option;
             while ((option = getopt_long(argc, argv, "", long_options, &index)) != -1) {
                 switch (option) {
-                    case (int)CameraYmlCliOption::mode:
-                        mode = optarg;
+                    #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
+                    case (int)CameraYmlCliOption::prop:                         \
+                        if (defaultArg == 0) {                                  \
+                            cameraYmlValues.prop = converter;                   \
+                        } else {                                                \
+                            if (LOST_OPTIONAL_OPTARG()) {                       \
+                                cameraYmlValues.prop = converter;               \
+                            } else {                                            \
+                                cameraYmlValues.prop = defaultArg;              \
+                            }                                                   \
+                        }                                                       \
                         break;
-                    case (int)CameraYmlCliOption::cameraConfig:
-                        cameraConfig = optarg;
-                        break;
-                    case (int)CameraYmlCliOption::resultsDir:
-                        resultsDir = optarg;
-                        break;
-                    case (int)CameraYmlCliOption::timingsTsv:
-                        timingsTsv = optarg;
-                        break;
-                    case (int)CameraYmlCliOption::python:
-                        pythonExe = optarg;
-                        break;
-                    case (int)CameraYmlCliOption::runFusion:
-                        runFusion = true;
-                        break;
-                    case (int)CameraYmlCliOption::fusionOutput:
-                        fusionOutput = optarg;
-                        break;
+                    #define LOST_OPTIONS_CAMERA_YML
+                    #include "options.hpp"
+                    #undef LOST_OPTIONS_CAMERA_YML
+                    #undef LOST_CLI_OPTION
                     case (int)CameraYmlCliOption::help:
                         std::cout
                             << "Usage: ./lost camera-yml [options]\n"
@@ -961,6 +960,14 @@ namespace lost {
                         exit(1);
                 }
             }
+
+            const std::string &mode = cameraYmlValues.mode;
+            const std::string &cameraConfig = cameraYmlValues.cameraConfig;
+            const std::string &resultsDir = cameraYmlValues.resultsDir;
+            const std::string &timingsTsv = cameraYmlValues.timingsTsv;
+            const std::string &pythonExe = cameraYmlValues.pythonExe;
+            const bool runFusion = cameraYmlValues.runFusion;
+            const std::string &fusionOutput = cameraYmlValues.fusionOutput;
 
             if (mode != "single" && mode != "folder" && mode != "live") {
                 BOOST_LOG_TRIVIAL(error) << "Invalid --mode. Expected single, folder, or live.";
@@ -1013,10 +1020,13 @@ namespace lost {
 
 bool atobool(const char *cstr) {
     std::string str(cstr);
-    if (str == "1" || str == "true") {
+    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (str == "1" || str == "true" || str == "on" || str == "yes") {
         return true;
     }
-    if (str == "0" || str == "false") {
+    if (str == "0" || str == "false" || str == "off" || str == "no") {
         return false;
     }
     assert(false);

@@ -1,48 +1,65 @@
 # camera.yml Workflows
 
-This guide explains mode-based execution from `conf/camera.yml`.
+This guide explains how `conf/camera.yml` drives single-image, folder, and live workflows.
 
 ## Modes
 
-- `single`: per-camera image solve via `blind-solve`
-- `folder`: per-camera directory solve via `blind-solve-batch`
-- `live`: webcam capture + batch solve pipeline
+- `single`: per-camera `blind-solve`
+- `folder`: per-camera `blind-solve-batch`
+- `live`: webcam capture plus solve pipeline via `tools/realtime_batch_from_video.sh`
 
-## Default runtime behavior
+## Current defaults in `conf/camera.yml`
 
-Current mode defaults in `conf/camera.yml` include:
+Single mode defaults:
 
 - `timeout: 400`
-- `target_width: 720`
 - `preprocess: on`
 - `preprocess_mode: global`
+- `target_width: 720`
+- `max_dim: 2200`
+- `ecef: on`
+- `viz_3d: off`
 
-Live mode can also run a two-pass robust solve profile:
+Folder mode defaults:
 
-- `fast_timeout`: timeout for initial fast pass
-- `fallback_timeout`: timeout for retry pass on failed frames
-- `fallback_on_fail`: `on|off` retry control
-- `solve_every_nth`: frame decimation before solving
+- `timeout: 400`
+- `jobs: 2`
+- `preprocess: on`
+- `preprocess_mode: global`
+- `target_width: 720`
+- `max_dim: 2200`
 
-Per-camera values override mode defaults.
+Live mode defaults:
+
+- `timeout: 400`
+- `fast_timeout: 25`
+- `fallback_timeout: 120`
+- `fallback_on_fail: on`
+- `solve_every_nth: 2`
+- `jobs: 2`
+- `fps: 1`
+- `duration_sec: 60`
+- `target_width: 720`
+
+Per-camera keys override the matching mode defaults.
 
 ## Python runner
 
 ```bash
-/Users/stdaux-001/StdAux/Projects/ACDS/.venv/bin/python tools/blind_solve_from_camera_yml.py \
+python3 tools/blind_solve_from_camera_yml.py \
   --mode single \
   --camera-config conf/camera.yml \
-  --binary ./build/bin/lost \
+  --binary ./bin/lost \
   --results-dir logs/blind-solve-cameras/single
 ```
 
-CLI timeout override for all cameras in the selected mode:
+Override timeout for the selected mode at runtime:
 
 ```bash
-/Users/stdaux-001/StdAux/Projects/ACDS/.venv/bin/python tools/blind_solve_from_camera_yml.py \
+python3 tools/blind_solve_from_camera_yml.py \
   --mode folder \
   --camera-config conf/camera.yml \
-  --binary ./build/bin/lost \
+  --binary ./bin/lost \
   --results-dir logs/blind-solve-cameras/folder \
   --timeout 400
 ```
@@ -55,15 +72,19 @@ CLI timeout override for all cameras in the selected mode:
 ./bin/lost camera-yml --mode live --camera-config conf/camera.yml
 ```
 
+## Important limitation
+
+The current camera.yml runner does not expose blind-solve `--profile`. If you want profile-like behavior in camera-driven workflows, set the explicit numeric fields in `conf/camera.yml`.
+
 ## Output layout
 
-- Per-camera: `<results-dir>/<camera_id>/`
-- Command used: `<results-dir>/<camera_id>/command.txt`
-- Run log: `<results-dir>/<camera_id>/run.log`
-- Aggregate table: `<results-dir>/timings.tsv`
+- per-camera directory: `<results-dir>/<camera_id>/`
+- exact command used: `<results-dir>/<camera_id>/command.txt`
+- run log: `<results-dir>/<camera_id>/run.log`
+- aggregate timings: `<results-dir>/timings.tsv`
 
-For live mode with fallback enabled, additional artifacts are produced under each camera output directory:
+Live mode with fallback enabled also produces:
 
-- `solve_fast/summary.tsv`: first pass summary
-- `solve_fallback/summary.tsv`: retry summary for failed frames
-- `solve/summary_merged.tsv`: merged result table (fallback rows override failed fast rows)
+- `solve_fast/summary.tsv`
+- `solve_fallback/summary.tsv`
+- `solve/summary_merged.tsv`

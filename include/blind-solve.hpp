@@ -7,6 +7,8 @@ namespace lost {
 
 class BlindSolveOptions {
 public:
+    // Blind-solve preset profile: default, wide-field, or narrow-field.
+    std::string profile = "default";
     std::string imagePath = "";
     std::string indexDirectory = "";
     std::string outputDirectory = "logs/blind-solve";
@@ -36,6 +38,12 @@ public:
     std::string visualizationOutputPath = "";  // Path to save 3D visualization (PNG)
     std::string ecefOutputPath = "";      // Path to save ECEF attitude data (JSON)
     bool ecefConsoleOutput = true;        // Print ECEF attitude to console (default: true)
+
+    // Maximum number of stars to use for solving (default: 50).
+    int maxStarCount = 50;
+
+    // Minimum angular separation between selected sources (in degrees).
+    float minStarSeparation = 0.1f;
 };
 
 class BlindSolveResult {

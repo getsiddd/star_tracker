@@ -1,68 +1,112 @@
 # Blind Solve Guide
 
-This guide covers single-image and batch blind solving with current recommended settings.
+This guide covers the current recommended workflows for `blind-solve` and `blind-solve-batch`.
 
 ## Prerequisites
 
-- `solve-field` and `wcsinfo` available from astrometry.net.
-- Astrometry index files downloaded into `conf/astrometry-index`.
+- `solve-field`, `wcsinfo`, `tablist`, and `text2fits` available from `astrometry.net`
+- index FITS files available in `conf/astrometry-index`
+- built binary at `./bin/lost`
 
-## Download index files
+## Use targeted indexes first
 
-Example helper script:
+Start with targeted index families that match your expected field of view. Avoid the full crawler unless you have large free disk space.
+
+Helper script example:
 
 ```bash
 ./tools/download-astrometry-indexes.sh 4200 00 11 conf/astrometry-index
 ```
 
-For wider coverage across fields of view, include additional 4100/4200 families.
+## Single-image solves
 
-## Single image solve
+### Wide-field starting point
 
 ```bash
-./build/bin/lost blind-solve \
-  --image sample/_AST0931.JPG \
+./bin/lost blind-solve \
+  --profile wide-field \
+  --image sample/DSC08982.jpeg \
   --index-dir conf/astrometry-index \
-  --output-dir logs/blind-solve-single \
-  --scale-low 10 --scale-high 400 \
-  --downsample 2 \
-  --timeout 400 \
-  --preprocess on \
-  --preprocess-mode global \
-  --target-width 720 \
-  --max-dim 2200 \
+  --output-dir logs/blind-solve-wide \
   --overwrite
 ```
 
-## Batch folder solve
+### Narrow-field starting point
 
 ```bash
-./build/bin/lost blind-solve-batch \
+./bin/lost blind-solve \
+  --profile narrow-field \
+  --image sample/_AST0931.JPG \
+  --index-dir conf/astrometry-index \
+  --output-dir logs/blind-solve-narrow \
+  --overwrite
+```
+
+### Manual tuning on top of a profile
+
+```bash
+./bin/lost blind-solve \
+  --profile narrow-field \
+  --image sample/_AST0938.JPG \
+  --index-dir conf/astrometry-index \
+  --output-dir logs/blind-solve-ast0938 \
+  --scale-low 20 \
+  --scale-high 40 \
+  --timeout 240 \
+  --overwrite
+```
+
+Explicit CLI flags override the values supplied by `--profile`.
+
+## Batch solves
+
+```bash
+./bin/lost blind-solve-batch \
+  --profile wide-field \
   --input-dir sample \
   --index-dir conf/astrometry-index \
   --output-dir logs/blind-solve-batch \
-  --scale-low 10 --scale-high 400 \
-  --downsample 2 \
-  --timeout 400 \
-  --jobs 2 \
-  --preprocess on \
-  --preprocess-mode global \
-  --target-width 720 \
-  --max-dim 2200 \
+  --jobs 4 \
   --overwrite
 ```
 
-## Key output fields
+Important batch outputs:
 
-- `blind_solve_success`
-- `blind_solve_ra_deg`
-- `blind_solve_dec_deg`
-- `blind_solve_rotation_deg`
-- `blind_solve_plate_scale_arcsec_per_pix`
-- `blind_solve_wcs_file`
+- `<output-dir>/summary.tsv`
+- `<output-dir>/summary_pretty.tsv`
+- one artifact directory per input image
+
+## Solve controls that matter most
+
+- `--profile`: `default`, `wide-field`, `narrow-field`
+- `--scale-low`, `--scale-high`: narrow these whenever approximate plate scale is known
+- `--timeout`: hard cap for each solve invocation
+- `--downsample`: faster, but can lose weak sources if pushed too far
+- `--preprocess` and `--preprocess-mode`
+- `--target-width` and `--max-dim`
+- `--max-star-count`
+- `--min-star-separation`
+
+## Source filtering behavior
+
+The current solver path now does all of the following before the final filtered solve:
+
+1. extracts the initial source list with `solve-field --dont-augment --keep-xylist`
+2. dumps the xy list with `tablist`
+3. filters sources in C++
+4. rebuilds a FITS table with `text2fits`
+5. runs the solve on the filtered source catalog
+
+That means `--min-star-separation` and `--max-star-count` now materially change the actual solve inputs.
+
+## Dataset-specific observations
+
+- `_AST0931.JPG` solved with the narrow-field profile and improved slightly over baseline
+- `_AST0938.JPG` remained unsolved, but narrowing the scale window reduced wasted runtime
+- tile mode was a poor fit for the current narrow-field sample set; `global` preprocessing remained the better default
 
 ## Timeout guidance
 
-- `--timeout 400` is the documented default in current camera.yml workflows.
-- Some hard images can exceed this budget and still solve if timeout is removed.
-- Timeout failures are not always index failures; test with `--timeout 0` to confirm.
+- camera.yml workflows still default to `timeout: 400`
+- the raw blind-solve CLI defaults to `timeout 120` before profile application
+- test a hard failure with `--timeout 0` if you need to separate timeout pressure from outright no-match behavior

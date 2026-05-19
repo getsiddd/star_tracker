@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -20,6 +21,13 @@
 namespace lost {
 
 namespace {
+
+struct ExtractedSource {
+    double x = 0.0;
+    double y = 0.0;
+    double flux = 0.0;
+    double background = 0.0;
+};
 
 std::string DegreesToHMS(double raDeg) {
     // Convert RA in degrees to hours:minutes:seconds format
@@ -275,12 +283,17 @@ bool BuildPreprocessedInputs(const std::filesystem::path &imagePath,
                 continue;
             }
 
+            const int tileCenterY = y + (tileH / 2);
+            const int tileCenterX = x + (tileW / 2);
+            const int offsetY = tileCenterY - (height / 2);
+            const int offsetX = tileCenterX - (width / 2);
+
             std::filesystem::path tilePath =
                 tilesDir / ("tile_y" + std::to_string(y) + "_x" + std::to_string(x) + ".png");
 
             std::string cropCommand =
                 "sips -c " + std::to_string(tileH) + " " + std::to_string(tileW) +
-                " --cropOffset " + std::to_string(y) + " " + std::to_string(x) + " " +
+                " --cropOffset " + std::to_string(offsetY) + " " + std::to_string(offsetX) + " " +
                 ShellEscape(imagePath.string()) + " --out " + ShellEscape(tilePath.string()) +
                 " >/dev/null 2>&1";
 
@@ -296,6 +309,196 @@ bool BuildPreprocessedInputs(const std::filesystem::path &imagePath,
         return false;
     }
 
+    return true;
+}
+
+double EstimateMinSeparationPixels(const BlindSolveOptions &values) {
+    if (values.minStarSeparation <= 0.0f) {
+        return 0.0;
+    }
+
+    const double scaleLow = std::max(0.001, static_cast<double>(values.scaleLowArcsecPerPix));
+    const double scaleHigh = std::max(scaleLow, static_cast<double>(values.scaleHighArcsecPerPix));
+    const double estimatedScaleArcsecPerPix = std::sqrt(scaleLow * scaleHigh);
+    return (static_cast<double>(values.minStarSeparation) * 3600.0) / estimatedScaleArcsecPerPix;
+}
+
+bool ParseTablistSources(const std::string &text,
+                         std::vector<ExtractedSource> &sources,
+                         std::string &errorOut) {
+    sources.clear();
+
+    std::stringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        std::istringstream row(line);
+        int index = 0;
+        ExtractedSource source;
+        if (!(row >> index >> source.x >> source.y >> source.flux >> source.background)) {
+            continue;
+        }
+        sources.push_back(source);
+    }
+
+    if (sources.empty()) {
+        errorOut = "No extracted sources were parsed from tablist output.";
+        return false;
+    }
+
+    return true;
+}
+
+std::vector<ExtractedSource> FilterSources(const std::vector<ExtractedSource> &sources,
+                                           const BlindSolveOptions &values) {
+    std::vector<ExtractedSource> sortedSources = sources;
+    std::sort(sortedSources.begin(), sortedSources.end(), [](const ExtractedSource &left, const ExtractedSource &right) {
+        if (left.flux != right.flux) {
+            return left.flux > right.flux;
+        }
+        return left.background < right.background;
+    });
+
+    const double minSeparationPixels = EstimateMinSeparationPixels(values);
+    const double minSeparationSq = minSeparationPixels * minSeparationPixels;
+    const int maxStars = values.maxStarCount;
+
+    std::vector<ExtractedSource> filtered;
+    filtered.reserve(sortedSources.size());
+    for (const auto &candidate : sortedSources) {
+        bool tooClose = false;
+        if (minSeparationSq > 0.0) {
+            for (const auto &accepted : filtered) {
+                const double dx = candidate.x - accepted.x;
+                const double dy = candidate.y - accepted.y;
+                if ((dx * dx) + (dy * dy) < minSeparationSq) {
+                    tooClose = true;
+                    break;
+                }
+            }
+        }
+        if (tooClose) {
+            continue;
+        }
+
+        filtered.push_back(candidate);
+        if (maxStars > 0 && static_cast<int>(filtered.size()) >= maxStars) {
+            break;
+        }
+    }
+
+    return filtered;
+}
+
+bool BuildFilteredSourceCatalog(const std::filesystem::path &solveImagePath,
+                                const std::filesystem::path &attemptOutputDirectory,
+                                const BlindSolveOptions &values,
+                                std::filesystem::path &catalogPath,
+                                int &imageWidth,
+                                int &imageHeight,
+                                std::string &errorOut) {
+    catalogPath.clear();
+    imageWidth = 0;
+    imageHeight = 0;
+
+    if (!GetImageDimensionsSips(solveImagePath, imageWidth, imageHeight)) {
+        errorOut = "Failed to read filtered-source image dimensions for: " + solveImagePath.string();
+        return false;
+    }
+
+    const bool needsFiltering = values.maxStarCount > 0 || values.minStarSeparation > 0.0f;
+    if (!needsFiltering) {
+        return false;
+    }
+
+    namespace fs = std::filesystem;
+    const std::string stem = solveImagePath.stem().string();
+    const fs::path rawXyPath = attemptOutputDirectory / (stem + ".raw.xy.fits");
+    const fs::path rawTextPath = attemptOutputDirectory / (stem + ".raw.xy.txt");
+    const fs::path filteredTextPath = attemptOutputDirectory / (stem + ".filtered.xy.txt");
+    const fs::path filteredFitsPath = attemptOutputDirectory / (stem + ".filtered.xy.fits");
+    const fs::path extractStdoutPath = attemptOutputDirectory / "extract-sources.stdout.log";
+    const fs::path extractStderrPath = attemptOutputDirectory / "extract-sources.stderr.log";
+
+    std::string extractCommand =
+        "solve-field " + ShellEscape(solveImagePath.string()) +
+        " --dir " + ShellEscape(attemptOutputDirectory.string()) +
+        " --no-plots --no-verify --dont-augment" +
+        " --downsample " + std::to_string(std::max(1, values.downsample)) +
+        " --keep-xylist " + ShellEscape(rawXyPath.string());
+    if (values.overwrite) {
+        extractCommand += " --overwrite";
+    }
+    extractCommand +=
+        " > " + ShellEscape(extractStdoutPath.string()) +
+        " 2> " + ShellEscape(extractStderrPath.string());
+
+    int status = std::system(extractCommand.c_str());
+    if (status == -1 || !fs::exists(rawXyPath)) {
+        errorOut = ReadFileToString(extractStderrPath.string());
+        if (errorOut.empty()) {
+            errorOut = "Failed to extract raw source list for: " + solveImagePath.string();
+        }
+        return false;
+    }
+
+    std::string tablistCommand =
+        "tablist " + ShellEscape(rawXyPath.string()) +
+        " > " + ShellEscape(rawTextPath.string()) +
+        " 2>> " + ShellEscape(extractStderrPath.string());
+    status = std::system(tablistCommand.c_str());
+    if (status == -1 || !fs::exists(rawTextPath)) {
+        errorOut = ReadFileToString(extractStderrPath.string());
+        if (errorOut.empty()) {
+            errorOut = "Failed to dump extracted source list for: " + solveImagePath.string();
+        }
+        return false;
+    }
+
+    std::vector<ExtractedSource> rawSources;
+    if (!ParseTablistSources(ReadFileToString(rawTextPath.string()), rawSources, errorOut)) {
+        return false;
+    }
+
+    std::vector<ExtractedSource> filteredSources = FilterSources(rawSources, values);
+    if (filteredSources.size() < 4) {
+        std::stringstream message;
+        message << "Filtered source list is too small to solve (kept " << filteredSources.size()
+                << " of " << rawSources.size() << " sources).";
+        errorOut = message.str();
+        return false;
+    }
+
+    std::ofstream filteredText(filteredTextPath);
+    if (!filteredText.good()) {
+        errorOut = "Unable to write filtered source list: " + filteredTextPath.string();
+        return false;
+    }
+    filteredText << std::fixed << std::setprecision(6);
+    for (const auto &source : filteredSources) {
+        filteredText << source.x << ' ' << source.y << ' ' << source.flux << ' ' << source.background << "\n";
+    }
+    filteredText.close();
+
+    std::string text2fitsCommand =
+        "text2fits -H 'X Y FLUX BACKGROUND' -f dddd " +
+        ShellEscape(filteredTextPath.string()) + " " + ShellEscape(filteredFitsPath.string()) +
+        " >> " + ShellEscape(extractStdoutPath.string()) +
+        " 2>> " + ShellEscape(extractStderrPath.string());
+    status = std::system(text2fitsCommand.c_str());
+    if (status == -1 || !fs::exists(filteredFitsPath)) {
+        errorOut = ReadFileToString(extractStderrPath.string());
+        if (errorOut.empty()) {
+            errorOut = "Failed to build filtered FITS source list for: " + solveImagePath.string();
+        }
+        return false;
+    }
+
+    BOOST_LOG_TRIVIAL(info)
+        << "Filtered sources for " << solveImagePath.filename().string()
+        << ": kept " << filteredSources.size() << " of " << rawSources.size()
+        << " with minimum separation " << EstimateMinSeparationPixels(values) << " px.";
+
+    catalogPath = filteredFitsPath;
     return true;
 }
 
@@ -317,20 +520,52 @@ bool SolveOneInput(const std::filesystem::path &solveImagePath,
     std::string fullPassCommand;
     bool hasFullPassCommand = false;
     bool fullPassRan = false;
+    const int maxObjects = std::max(0, values.maxStarCount);
+    fs::path filteredCatalogPath;
+    fs::path commandInputPath = solveImagePath;
+    int imageWidth = 0;
+    int imageHeight = 0;
+
+    std::string filterError;
+    if (BuildFilteredSourceCatalog(solveImagePath,
+                                   attemptOutputDirectory,
+                                   values,
+                                   filteredCatalogPath,
+                                   imageWidth,
+                                   imageHeight,
+                                   filterError)) {
+        commandInputPath = filteredCatalogPath;
+    } else if (!filterError.empty() && (values.maxStarCount > 0 || values.minStarSeparation > 0.0f)) {
+        BOOST_LOG_TRIVIAL(warning) << "Falling back to unfiltered blind solve input for "
+                                   << solveImagePath.filename().string() << ": " << filterError;
+    }
+
+    const bool usingFilteredCatalog = !filteredCatalogPath.empty();
 
     auto BuildSolveCommand = [&](int downsample, int timeoutSeconds, bool fastPass) {
         std::string command =
-            "solve-field " + ShellEscape(solveImagePath.string()) +
+            "solve-field " + ShellEscape(commandInputPath.string()) +
             " --dir " + ShellEscape(attemptOutputDirectory.string()) +
             " --no-plots --no-verify" +
             " --scale-units arcsecperpix" +
             " --scale-low " + std::to_string(values.scaleLowArcsecPerPix) +
             " --scale-high " + std::to_string(values.scaleHighArcsecPerPix) +
-            " --downsample " + std::to_string(downsample) +
             " --cpulimit " + std::to_string(timeoutSeconds);
 
-        if (fastPass) {
-            command += " --no-tweak --objs 80 --depth 1-80";
+        if (usingFilteredCatalog) {
+            command += " --x-column X --y-column Y --sort-column FLUX";
+            command += " --width " + std::to_string(imageWidth);
+            command += " --height " + std::to_string(imageHeight);
+        } else {
+            command += " --downsample " + std::to_string(downsample);
+        }
+
+        if (fastPass && !usingFilteredCatalog) {
+            command += " --no-tweak";
+            if (maxObjects > 0) {
+                command += " --objs " + std::to_string(maxObjects);
+                command += " --depth 1-" + std::to_string(maxObjects);
+            }
         }
         if (!configArg.empty()) {
             command += configArg;
@@ -386,7 +621,7 @@ bool SolveOneInput(const std::filesystem::path &solveImagePath,
         }
     }
 
-    fs::path wcsPath = attemptOutputDirectory / (solveImagePath.stem().string() + ".wcs");
+    fs::path wcsPath = attemptOutputDirectory / (commandInputPath.stem().string() + ".wcs");
     if (!fs::exists(wcsPath) && hasFullPassCommand && !fullPassRan) {
         BOOST_LOG_TRIVIAL(info) << "Fast pass produced no WCS output, retrying full blind solve pass.";
         BOOST_LOG_TRIVIAL(info) << "Running full blind solve pass: " << fullPassCommand;
@@ -494,6 +729,17 @@ BlindSolveResult BlindSolve(const BlindSolveOptions &values) {
         result.stderrText = preprocessError;
         return result;
     }
+
+    BOOST_LOG_TRIVIAL(info)
+        << "Blind solve profile=" << values.profile
+        << " scale=[" << values.scaleLowArcsecPerPix << ", " << values.scaleHighArcsecPerPix << "]"
+        << " downsample=" << values.downsample
+        << " preprocess=" << (values.preprocessEnabled ? "on" : "off")
+        << " mode=" << values.preprocessMode
+        << " target_width=" << values.preprocessTargetWidth
+        << " max_dim=" << values.preprocessMaxDimension
+        << " max_star_count=" << values.maxStarCount
+        << " min_star_separation=" << values.minStarSeparation;
 
     std::vector<std::string> attemptErrors;
     for (size_t i = 0; i < solveInputs.size(); ++i) {

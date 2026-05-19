@@ -74,7 +74,9 @@ class PipelineOptions {
 public:
 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
     type prop = defaultVal;
-#include "./pipeline-options.hpp"
+#define LOST_OPTIONS_PIPELINE
+#include "./options.hpp"
+#undef LOST_OPTIONS_PIPELINE
 #undef LOST_CLI_OPTION
 };
 
@@ -281,7 +283,9 @@ class DatabaseOptions {
 public:
 #define LOST_CLI_OPTION(name, type, prop, defaultVal, converter, defaultArg) \
     type prop = defaultVal;
-#include "database-options.hpp"
+#define LOST_OPTIONS_DATABASE
+#include "options.hpp"
+#undef LOST_OPTIONS_DATABASE
 #undef LOST_CLI_OPTION
 };
 

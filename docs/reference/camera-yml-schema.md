@@ -24,6 +24,7 @@ solve_modes:
 - `downsample`: solve-field downsampling
 - `timeout`: CPU time limit per solve attempt (seconds)
 - `target_width`: global preprocessing width target
+- `max_dim`: longest-side cap for global preprocessing
 
 ## Mode-specific keys
 
@@ -78,3 +79,7 @@ When resolving a value:
 3. script fallback
 
 Current script fallback timeout is 400.
+
+## Current limitation
+
+The current Python runner and `./bin/lost camera-yml` wrapper do not expose blind-solve `--profile`. If you want profile-like behavior in camera.yml workflows, set the underlying numeric fields explicitly in `defaults` or per-camera entries.
